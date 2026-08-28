@@ -6,7 +6,7 @@ type AttributeNodeData = DiagramNodeData & {
   lane?: 'north' | 'east' | 'south' | 'west'
 }
 
-/** Attributes are intentionally not handles: their terminal is visual only. */
+/** The terminal handle is laid over the visual marker so stems have no gap. */
 type AttributeNodeType = Node<AttributeNodeData, 'attribute'>
 
 export function AttributeNode({ data, selected }: NodeProps<AttributeNodeType>) {
@@ -18,10 +18,12 @@ export function AttributeNode({ data, selected }: NodeProps<AttributeNodeType>) 
     >
       <span className={`chen-attribute-node__terminal${data.key ? ' is-key' : ''}`} aria-hidden="true" />
       <span className={`chen-node__label${data.key ? ' is-key' : ''}`}>{data.label || 'Sin nombre'}</span>
-      <Handle className="chen-hidden-handle" type="target" position={Position.Top} id="target-top" />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Right} id="target-right" />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Bottom} id="target-bottom" />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Left} id="target-left" />
+      <Handle
+        className={`chen-hidden-handle chen-terminal-handle chen-terminal-handle--${lane}`}
+        type="target"
+        position={lane === 'north' ? Position.Bottom : lane === 'east' ? Position.Left : lane === 'south' ? Position.Top : Position.Right}
+        id="target-terminal"
+      />
     </div>
   )
 }

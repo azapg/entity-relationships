@@ -16,7 +16,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
 import { useDiagramStore } from './domain/store'
-import type { Cardinality, CustomTheme, SemanticSelection } from './domain/types'
+import type { Cardinality, CustomTheme, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
 import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
 
@@ -26,7 +26,27 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
   diagram: any; selection: SemanticSelection; onSelect: (s: SemanticSelection) => void; onMove: (id: string, p: { x: number; y: number }) => void
 }) {
   const rf = useReactFlow()
-  const rendered = useMemo(() => renderDiagram(diagram, selection?.id), [diagram, selection])
+  // React Flow is controlled by the semantic projection, but positions are
+  // intentionally persisted only once a drag finishes. Keep the in-progress
+  // position local so the node and all of its derived edges can follow the
+  // pointer without creating a store update for every pointer event.
+  const [dragPositions, setDragPositions] = useState<Record<string, Point>>({})
+  const rendered = useMemo(() => {
+    const activePositions = Object.keys(dragPositions).length > 0
+      ? { ...diagram.view.positions, ...dragPositions }
+      : diagram.view.positions
+    const renderDiagramSource = activePositions === diagram.view.positions
+      ? diagram
+      : { ...diagram, view: { ...diagram.view, positions: activePositions } }
+    return renderDiagram(renderDiagramSource, selection?.id)
+  }, [diagram, selection, dragPositions])
+
+  // If the model changes while a drag is being cancelled/interrupted (for
+  // example by deleting or resetting the diagram), never let an old transient
+  // position override the next canonical projection.
+  useEffect(() => {
+    setDragPositions({})
+  }, [diagram])
 
   const selectNode = useCallback((_: React.MouseEvent, node: Node) => {
     const data: any = node.data
@@ -42,9 +62,30 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
       edgeTypes={edgeTypes}
       onNodeClick={selectNode}
       onPaneClick={() => onSelect(null)}
+      onNodeDrag={(_, node) => {
+        const d: any = node.data
+        if (d.kind === 'entity' || d.kind === 'relationship') {
+          setDragPositions((current) => ({
+            ...current,
+            [d.semanticId ?? node.id]: { x: node.position.x, y: node.position.y },
+          }))
+        }
+      }}
       onNodeDragStop={(_, node) => {
         const d: any = node.data
-        if (d.kind === 'entity' || d.kind === 'relationship') onMove(d.semanticId ?? node.id, node.position)
+        if (d.kind === 'entity' || d.kind === 'relationship') {
+          const id = d.semanticId ?? node.id
+          const position = { x: node.position.x, y: node.position.y }
+          // One canonical write per completed drag; transient updates above
+          // stay local and therefore do not pollute persistence/history.
+          onMove(id, position)
+          setDragPositions((current) => {
+            if (!(id in current)) return current
+            const next = { ...current }
+            delete next[id]
+            return next
+          })
+        }
       }}
       fitView
       fitViewOptions={{ padding: 0.12, minZoom: 0.25, maxZoom: 1.2 }}

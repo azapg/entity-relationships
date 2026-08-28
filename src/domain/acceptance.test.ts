@@ -50,7 +50,7 @@ describe('flujo de aceptación semántico', () => {
     state().setEntityKind(professorId, 'strong')
     expect(state().diagram.entities.find((entity) => entity.id === professorId)?.kind).toBe('strong')
 
-    const course = state().diagram.entities.find((entity) => entity.name === 'COURSE')
+    const course = state().diagram.entities.find((entity) => entity.name === 'CURSO')
     expect(course).toBeDefined()
     const courseId = course!.id
     const teachesId = state().createRelationship('TEACHES', [
@@ -105,4 +105,3 @@ describe('flujo de aceptación semántico', () => {
     expect(hydrated?.relationships.some((relationship) => relationship.id === teachesId)).toBe(true)
   })
 })
-

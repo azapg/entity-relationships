@@ -1,7 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import type { DiagramNodeData } from '../types'
 
-/** A diamond is kept as CSS geometry so it scales with the renderer theme. */
+/** The SVG fills the measured node box, keeping handles on the visible tips. */
 type RelationshipNodeType = Node<DiagramNodeData, 'relationship'>
 
 export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeType>) {
@@ -10,7 +10,9 @@ export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeT
       className={`chen-node chen-relationship-node${selected || data.selected ? ' is-selected' : ''}`}
       aria-label={`Relación ${data.label}`}
     >
-      <span className="chen-relationship-node__diamond" aria-hidden="true" />
+      <svg className="chen-relationship-node__diamond" viewBox="0 0 132 92" preserveAspectRatio="none" aria-hidden="true">
+        <polygon points="66,0.8 131.2,46 66,91.2 0.8,46" />
+      </svg>
       <span className="chen-relationship-node__label">{data.label || 'Sin nombre'}</span>
       <Handle className="chen-hidden-handle" type="source" position={Position.Top} id="source-top" />
       <Handle className="chen-hidden-handle" type="source" position={Position.Right} id="source-right" />

@@ -9,27 +9,27 @@ export const createSampleDiagram = (): Diagram => ({
   entities: [
     {
       id: sampleId('student'),
-      name: 'STUDENT',
+      name: 'ESTUDIANTE',
       kind: 'strong',
       attributes: [
-        { id: sampleId('student-id'), name: 'student_id', key: true },
-        { id: sampleId('student-name'), name: 'name', key: false },
+        { id: sampleId('student-id'), name: 'estudiante_id', key: true },
+        { id: sampleId('student-name'), name: 'nombre', key: false },
       ],
     },
     {
       id: sampleId('course'),
-      name: 'COURSE',
+      name: 'CURSO',
       kind: 'strong',
       attributes: [
-        { id: sampleId('course-id'), name: 'course_id', key: true },
-        { id: sampleId('course-title'), name: 'title', key: false },
+        { id: sampleId('course-id'), name: 'curso_id', key: true },
+        { id: sampleId('course-title'), name: 'título', key: false },
       ],
     },
   ],
   relationships: [
     {
       id: sampleId('enrolls'),
-      name: 'ENROLLS',
+      name: 'INSCRIBE',
       participants: [
         {
           entityId: sampleId('student'),
@@ -40,7 +40,7 @@ export const createSampleDiagram = (): Diagram => ({
           cardinality: { min: 0, max: 'n' },
         },
       ],
-      attributes: [{ id: sampleId('grade'), name: 'grade', key: false }],
+      attributes: [{ id: sampleId('grade'), name: 'calificación', key: false }],
     },
   ],
   view: {
@@ -65,4 +65,3 @@ export const createBlankDiagram = (): Diagram => ({
     positions: {},
   },
 })
-

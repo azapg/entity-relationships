@@ -30,7 +30,7 @@ describe('renderDiagram / Chen-stem', () => {
     expect(first.nodes.map(({ id }) => id)).toEqual(second.nodes.map(({ id }) => id))
     expect(first.edges.map(({ id }) => id)).toEqual(second.edges.map(({ id }) => id))
     expect(first.nodes.find((node) => node.id === 'entity:sample-student')?.data).toMatchObject({
-      semanticId: 'sample-student', kind: 'entity', label: 'STUDENT', selected: false,
+      semanticId: 'sample-student', kind: 'entity', label: 'ESTUDIANTE', selected: false,
     })
     expect(first.edges.find((edge) => edge.id === 'participant-edge:sample-enrolls:sample-student:0')?.data)
       .toMatchObject({ cardinality: { min: 0, max: 'n' } })
@@ -64,6 +64,31 @@ describe('renderDiagram / Chen-stem', () => {
       .toMatchObject({ source: 'relationship:enrolls', target: 'attribute:relationship:enrolls:grade' })
   })
 
+  it('connects each attribute stem to the terminal marker on its lane', () => {
+    const result = renderDiagram(baseDiagram({
+      entities: [{
+        ...entity('person'),
+        attributes: [
+          { id: 'north', name: 'north', key: true },
+          { id: 'south', name: 'south', key: false },
+          { id: 'east', name: 'east', key: false },
+          { id: 'west', name: 'west', key: true },
+        ],
+      }],
+    }))
+
+    expect(result.edges.filter((edge) => edge.id.startsWith('attribute-edge:')).map((edge) => ({
+      lane: edge.data?.lane,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+    }))).toEqual([
+      { lane: 'north', sourceHandle: 'source-top', targetHandle: 'target-terminal' },
+      { lane: 'south', sourceHandle: 'source-bottom', targetHandle: 'target-terminal' },
+      { lane: 'east', sourceHandle: 'source-right', targetHandle: 'target-terminal' },
+      { lane: 'west', sourceHandle: 'source-left', targetHandle: 'target-terminal' },
+    ])
+  })
+
   it('supports n-ary participant lists and ignores missing entity references', () => {
     const diagram = baseDiagram({
       entities: [entity('student'), entity('course'), entity('teacher')],
@@ -90,4 +115,3 @@ describe('renderDiagram / Chen-stem', () => {
     ])
   })
 })
-

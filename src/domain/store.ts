@@ -118,6 +118,50 @@ const isDiagram = (value: unknown): value is Diagram => {
   )
 }
 
+type LegacySampleLabel = {
+  legacy: string
+  localized: string
+}
+
+/**
+ * Labels used by the original built-in sample. The IDs are intentionally
+ * stable so existing persisted samples can be localized without touching a
+ * user's positions, theme, or custom names.
+ */
+const LEGACY_SAMPLE_LABELS: Record<string, LegacySampleLabel> = {
+  'sample-student': { legacy: 'STUDENT', localized: 'ESTUDIANTE' },
+  'sample-student-id': { legacy: 'student_id', localized: 'estudiante_id' },
+  'sample-student-name': { legacy: 'name', localized: 'nombre' },
+  'sample-course': { legacy: 'COURSE', localized: 'CURSO' },
+  'sample-course-id': { legacy: 'course_id', localized: 'curso_id' },
+  'sample-course-title': { legacy: 'title', localized: 'título' },
+  'sample-enrolls': { legacy: 'ENROLLS', localized: 'INSCRIBE' },
+  'sample-grade': { legacy: 'grade', localized: 'calificación' },
+}
+
+const migrateLegacySample = (diagram: Diagram): boolean => {
+  if (diagram.id !== 'sample-diagram') return false
+
+  let migrated = false
+  const localize = (item: { id: string; name: string }) => {
+    const labels = LEGACY_SAMPLE_LABELS[item.id]
+    if (!labels || item.name !== labels.legacy) return
+    item.name = labels.localized
+    migrated = true
+  }
+
+  diagram.entities.forEach((entity) => {
+    localize(entity)
+    entity.attributes.forEach(localize)
+  })
+  diagram.relationships.forEach((relationship) => {
+    localize(relationship)
+    relationship.attributes.forEach(localize)
+  })
+
+  return migrated
+}
+
 export const readPersistedDiagram = (): Diagram | undefined => {
   const storage = getStorage()
   if (!storage) return undefined
@@ -127,9 +171,10 @@ export const readPersistedDiagram = (): Diagram | undefined => {
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return undefined
     const payload = parsed as Partial<PersistedDiagram>
-    return payload.version === STORAGE_VERSION && isDiagram(payload.diagram)
-      ? cloneDiagram(payload.diagram)
-      : undefined
+    if (payload.version !== STORAGE_VERSION || !isDiagram(payload.diagram)) return undefined
+    const diagram = cloneDiagram(payload.diagram)
+    if (migrateLegacySample(diagram)) persistDiagram(diagram)
+    return diagram
   } catch {
     // A malformed or unavailable localStorage should never prevent the editor
     // from opening with the sample diagram.
@@ -342,4 +387,3 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
     },
   }
 })
-

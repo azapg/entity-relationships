@@ -3,7 +3,10 @@ import type { Attribute, Diagram, Point } from '../../domain/types'
 import type { DiagramNodeData, RenderedDiagram } from '../types'
 
 const ENTITY_SIZE = { width: 170, height: 92 }
-const RELATION_SIZE = { width: 132, height: 82 }
+// Keep the relationship's layout box identical to the visible SVG diamond.
+// React Flow positions handles from this box, so a rotated child that spills
+// outside it would leave participant edges visibly short of the shape.
+const RELATION_SIZE = { width: 132, height: 92 }
 const ATTRIBUTE_SIZE = { width: 160, height: 38 }
 // Prefer vertical lanes first so a small academic diagram remains readable on
 // a phone; later attributes still fan out to the east and west.
@@ -33,6 +36,14 @@ function sideFor(from: Point, to: Point): Side {
 
 function opposite(side: Side): Side {
   return side === 'top' ? 'bottom' : side === 'right' ? 'left' : side === 'bottom' ? 'top' : 'right'
+}
+
+function center(position: Point, width: number, height: number): Point {
+  return { x: position.x + width / 2, y: position.y + height / 2 }
+}
+
+function sideForLane(lane: Lane): Side {
+  return lane === 'north' ? 'top' : lane === 'east' ? 'right' : lane === 'south' ? 'bottom' : 'left'
 }
 
 function selectedFor(selectedId: string | undefined, id: string) {
@@ -82,10 +93,13 @@ function ownerAttributes(owner: Owner, selectedId: string | undefined, nodes: No
       type: 'connector',
       source: semanticOwnerId,
       target: id,
-      sourceHandle: `source-${sideFor(owner.position, attributePosition(owner, lane, laneOffset))}`,
-      targetHandle: `target-${opposite(sideFor(owner.position, attributePosition(owner, lane, laneOffset)))}`,
+      // The lane is authoritative here.  Using the two top-left positions
+      // could switch sides for a wrapped/fanned-out attribute.  The terminal
+      // handle is placed over the marker itself, so the stem ends on the dot.
+      sourceHandle: `source-${sideForLane(lane)}`,
+      targetHandle: 'target-terminal',
       selectable: false,
-        data: { connectorKind: 'attribute', lane, sourceKind: owner.kind, selected: selectedFor(selectedId, owner.id) },
+      data: { connectorKind: 'attribute', lane, sourceKind: owner.kind, selected: selectedFor(selectedId, owner.id) },
     })
   })
 }
@@ -157,8 +171,14 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
         type: 'connector',
         source: entityNode,
         target: relationshipNode,
-        sourceHandle: `source-${sideFor(entityPositions.get(participant.entityId)!, relationshipPositions.get(relationship.id)!)}`,
-        targetHandle: `target-${opposite(sideFor(entityPositions.get(participant.entityId)!, relationshipPositions.get(relationship.id)!))}`,
+        sourceHandle: `source-${sideFor(
+          center(entityPositions.get(participant.entityId)!, ENTITY_SIZE.width, ENTITY_SIZE.height),
+          center(relationshipPositions.get(relationship.id)!, RELATION_SIZE.width, RELATION_SIZE.height),
+        )}`,
+        targetHandle: `target-${opposite(sideFor(
+          center(entityPositions.get(participant.entityId)!, ENTITY_SIZE.width, ENTITY_SIZE.height),
+          center(relationshipPositions.get(relationship.id)!, RELATION_SIZE.width, RELATION_SIZE.height),
+        ))}`,
         data: { connectorKind: 'participant', cardinality: participant.cardinality, selected: selectedFor(selectedId, relationship.id) },
       })
     })
