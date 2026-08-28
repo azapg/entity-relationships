@@ -1,0 +1,127 @@
+.chen-node {
+  box-sizing: border-box;
+  color: var(--ink, #25231f);
+  font-family: var(--diagram-font, Georgia, 'Times New Roman', serif);
+  font-size: 15px;
+  letter-spacing: .01em;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chen-entity-node {
+  position: relative;
+  display: grid;
+  width: 170px;
+  height: 92px;
+  place-items: center;
+  padding: 14px 18px;
+  border: var(--stroke-width, 1.35px) solid var(--entity-stroke, var(--ink, #25231f));
+  background: var(--entity-fill, #fbfaf6);
+  text-align: center;
+  transition: box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.chen-entity-node--weak { border-width: 2px; }
+.chen-entity-node__inner {
+  position: absolute;
+  inset: 5px;
+  border: 1px solid var(--entity-stroke, var(--ink, #25231f));
+  pointer-events: none;
+}
+
+.chen-relationship-node {
+  position: relative;
+  width: 132px;
+  height: 82px;
+  display: grid;
+  place-items: center;
+}
+.chen-relationship-node__diamond {
+  position: absolute;
+  inset: 7px 4px;
+  transform: rotate(45deg);
+  border: var(--stroke-width, 1.35px) solid var(--relationship-stroke, var(--ink, #25231f));
+  background: var(--relationship-fill, #f5f1e8);
+}
+.chen-relationship-node__label {
+  position: relative;
+  max-width: 94px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.chen-attribute-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 160px;
+  height: 38px;
+  padding: 4px 10px;
+}
+.chen-attribute-node__terminal {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  margin-right: 9px;
+  border: 1.4px solid var(--key-marker, var(--ink, #25231f));
+  border-radius: 50%;
+  background: var(--canvas, #fbfaf6);
+}
+.chen-attribute-node__terminal.is-key { background: var(--key-marker, var(--ink, #25231f)); }
+.chen-attribute-node .chen-node__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chen-node__label.is-key { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+.chen-node.is-selected .chen-entity-node,
+.chen-entity-node.is-selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--entity-stroke, #25231f) 17%, transparent);
+}
+.chen-relationship-node.is-selected .chen-relationship-node__diamond {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--relationship-stroke, #25231f) 17%, transparent);
+}
+.chen-attribute-node.is-selected { background: color-mix(in srgb, var(--entity-fill, #fbfaf6) 85%, var(--ink, #25231f)); }
+
+.chen-connector-edge { stroke: var(--ink, #25231f); stroke-width: var(--stroke-width, 1.35px); }
+.chen-connector-edge.is-selected { stroke-width: 2px; }
+.chen-cardinality-label {
+  position: absolute;
+  z-index: 5;
+  padding: 2px 5px;
+  color: var(--ink, #25231f);
+  background: var(--canvas, #fbfaf6);
+  font-family: var(--diagram-font, Georgia, 'Times New Roman', serif);
+  font-size: 13px;
+  line-height: 1.1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.react-flow__node { cursor: grab; }
+.react-flow__node:active { cursor: grabbing; }
+.react-flow__node[data-id^='attribute:'] { cursor: default; }
+.chen-hidden-handle {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+}
+
+.chen-attribute-node--west { justify-content: flex-end; }
+.chen-attribute-node--west .chen-attribute-node__terminal { order: 2; margin: 0 0 0 9px; }
+.chen-attribute-node--north,
+.chen-attribute-node--south { justify-content: center; }
+.chen-attribute-node--north .chen-attribute-node__terminal,
+.chen-attribute-node--south .chen-attribute-node__terminal { position: absolute; left: calc(50% - 5.5px); margin: 0; }
+.chen-attribute-node--north .chen-attribute-node__terminal { bottom: 1px; }
+.chen-attribute-node--south .chen-attribute-node__terminal { top: 1px; }
+.chen-attribute-node--north .chen-node__label { transform: translateY(-5px); }
+.chen-attribute-node--south .chen-node__label { transform: translateY(5px); }
+
+@media (max-width: 560px) {
+  .chen-node { font-size: 14px; }
+  .chen-entity-node { width: 160px; height: 88px; }
+  .chen-cardinality-label { font-size: 12px; }
+}
