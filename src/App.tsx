@@ -8,6 +8,7 @@ import {
   MiniMap,
   useReactFlow,
   applyNodeChanges,
+  BackgroundVariant,
   type Node,
   type NodeChange,
 } from '@xyflow/react'
@@ -20,25 +21,23 @@ import './styles/app.css'
 import { useDiagramStore } from './domain/store'
 import type { Cardinality, CustomTheme, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
+import { GRID_SIZE } from './domain/layout'
 import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
 import type { DiagramNodeData } from './renderers/types'
 
 type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'appearance' | 'menu' | null
 
-// React Flow temporarily hides a node while measuring it when a controlled
-// update replaces the user node and drops its measured dimensions. Dragging
-// does exactly that on every pointer frame, so provide the fixed Chen layout
-// dimensions up front and keep the nodes visible throughout the drag.
-function withStableNodeDimensions(rendered: ReturnType<typeof renderDiagram>) {
+// Attributes are disposable renderer output, not layout objects. Keep them
+// out of React Flow's drag interaction while allowing the renderer to own all
+// of their geometry. In particular, do not inject guessed width/height here:
+// React Flow's measured dimensions belong to the renderer and replacing them
+// with stale values is what causes the drag flicker this canvas used to have.
+function prepareRendered(rendered: ReturnType<typeof renderDiagram>) {
   return {
     ...rendered,
     nodes: rendered.nodes.map((node) => {
-      const dimensions = node.data.kind === 'entity'
-        ? { width: 170, height: 92 }
-        : node.data.kind === 'relationship'
-          ? { width: 132, height: 92 }
-          : { width: 160, height: 38 }
-      return { ...node, ...dimensions }
+      if (node.data.kind !== 'attribute') return node
+      return { ...node, draggable: false }
     }),
   }
 }
@@ -47,11 +46,12 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
   diagram: any; selection: SemanticSelection; onSelect: (s: SemanticSelection) => void; onMove: (id: string, p: { x: number; y: number }) => void
 }) {
   const rf = useReactFlow()
+  const layoutMode = diagram.view?.layoutMode ?? 'structured'
   // React Flow is controlled locally during a drag. Re-projecting the whole
   // semantic diagram for every pointer event replaces every node and edge,
   // which makes React Flow lose its drag state and visibly flicker. The
   // semantic model is still updated once, on drag stop, below.
-  const initialRendered = useMemo(() => withStableNodeDimensions(renderDiagram(diagram, selection?.id)), [diagram, selection])
+  const initialRendered = useMemo(() => prepareRendered(renderDiagram(diagram, selection?.id)), [diagram, selection])
   const [nodes, setNodes] = useState<Node<DiagramNodeData>[]>(initialRendered.nodes)
   const [edges, setEdges] = useState(initialRendered.edges)
 
@@ -59,7 +59,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
   // from elsewhere) replaces the local projection. This effect does not
   // depend on local nodes, so it cannot form a render loop while dragging.
   useEffect(() => {
-    const next = withStableNodeDimensions(renderDiagram(diagram, selection?.id))
+    const next = prepareRendered(renderDiagram(diagram, selection?.id))
     setNodes(next.nodes)
     setEdges(next.edges)
   }, [diagram, selection])
@@ -110,7 +110,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
     else if (data.ownerId) onSelect({ type: data.ownerKind ?? 'entity', id: data.ownerId })
   }, [onSelect])
 
-  return <div className="canvas-wrap">
+  return <div className={`canvas-wrap layout-${layoutMode}`}>
     <ReactFlow
       nodes={nodes}
       edges={edges}
@@ -129,6 +129,8 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
         }
       }}
       onNodesChange={onNodesChange}
+      snapToGrid={layoutMode === 'structured'}
+      snapGrid={[GRID_SIZE, GRID_SIZE]}
       fitView
       fitViewOptions={{ padding: 0.12, minZoom: 0.25, maxZoom: 1.2 }}
       panOnDrag
@@ -142,9 +144,14 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
       proOptions={{ hideAttribution: true }}
       selectionOnDrag={false}
       onlyRenderVisibleElements={false}
-      className="er-flow"
+      className={`er-flow ${layoutMode === 'structured' ? 'is-structured' : 'is-freeform'}`}
     >
-      <Background gap={28} size={1} color="var(--grid)" />
+      <Background
+        variant={BackgroundVariant.Lines}
+        gap={layoutMode === 'structured' ? GRID_SIZE : GRID_SIZE * 2}
+        size={1}
+        color="var(--grid)"
+      />
       <Controls showInteractive={false} className="rf-controls" />
       <MiniMap pannable zoomable nodeColor="var(--minimap-node)" className="rf-minimap" />
     </ReactFlow>
@@ -270,14 +277,15 @@ function CardinalityEditor({ relationship, entities, store, onDone }: any) {
 
 function AppearanceEditor({ view, store, onDone }: any) {
   const [custom, setCustom] = useState<CustomTheme>(view.customTheme ?? { background: '#f7f5ef', entity: '#fffdf8', relationship: '#f0ebe1', ink: '#26231f', font: 'serif' })
-  return <div className="appearance-stack"><p className="section-kicker">Estilo del diagrama</p><div className="theme-grid">{([['academic', 'Académico', 'paper'], ['warm', 'Cálido', 'warm'], ['modern', 'Moderno', 'modern']] as const).map(([id, label, klass]) => <button type="button" className={`theme-card ${view.theme === id ? 'selected' : ''}`} key={id} onClick={() => store.setTheme(id)}><span className={`theme-preview ${klass}`}><b /><i /></span><span>{label}</span></button>)}</div><div className="custom-toggle"><span>Colores personalizados</span><small>Opcional</small></div><div className="color-fields">{([['background', 'Fondo'], ['entity', 'Entidad'], ['relationship', 'Relación'], ['ink', 'Tinta']] as const).map(([key, label]) => <label key={key}>{label}<input type="color" value={custom[key]} onChange={e => { const next = { ...custom, [key]: e.target.value }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }} /></label>)}</div><label className="font-select">Tipografía<select value={custom.font} onChange={e => { const font = e.target.value as 'serif' | 'sans'; const next = { ...custom, font }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }}><option value="serif">Serif académica</option><option value="sans">Sans moderna</option></select></label><button type="button" className="secondary-button full-button" onClick={onDone}>Listo</button></div>
+  const layoutMode = view.layoutMode ?? 'structured'
+  return <div className="appearance-stack"><p className="section-kicker">Estilo del diagrama</p><div className="theme-grid">{([['academic', 'Académico', 'paper'], ['warm', 'Cálido', 'warm'], ['modern', 'Moderno', 'modern']] as const).map(([id, label, klass]) => <button type="button" className={`theme-card ${view.theme === id ? 'selected' : ''}`} key={id} onClick={() => store.setTheme(id)}><span className={`theme-preview ${klass}`}><b /><i /></span><span>{label}</span></button>)}</div><div className="layout-mode-section"><p className="section-kicker">Distribución</p><div className="segmented layout-mode-toggle" role="group" aria-label="Modo de distribución del diagrama"><button type="button" className={layoutMode === 'structured' ? 'active' : ''} aria-pressed={layoutMode === 'structured'} onClick={() => store.setLayoutMode('structured')}>Estructurado</button><button type="button" className={layoutMode === 'freeform' ? 'active' : ''} aria-pressed={layoutMode === 'freeform'} onClick={() => store.setLayoutMode('freeform')}>Libre</button></div><p className="layout-mode-help">Estructurado ajusta entidades y relaciones a una cuadrícula de 24 px.</p></div><div className="custom-toggle"><span>Colores personalizados</span><small>Opcional</small></div><div className="color-fields">{([['background', 'Fondo'], ['entity', 'Entidad'], ['relationship', 'Relación'], ['ink', 'Tinta']] as const).map(([key, label]) => <label key={key}>{label}<input type="color" value={custom[key]} onChange={e => { const next = { ...custom, [key]: e.target.value }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }} /></label>)}</div><label className="font-select">Tipografía<select value={custom.font} onChange={e => { const font = e.target.value as 'serif' | 'sans'; const next = { ...custom, font }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }}><option value="serif">Serif académica</option><option value="sans">Sans moderna</option></select></label><button type="button" className="secondary-button full-button" onClick={onDone}>Listo</button></div>
 }
 
 function DiagramMenu({ diagram, store, onClose, onToast }: any) {
   const [name, setName] = useState(diagram.name)
   const rename = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) store.setDiagramName(name.trim()); onClose() }
   const reset = (mode: 'blank' | 'sample') => { if (window.confirm(mode === 'blank' ? '¿Crear un diagrama vacío? Se reemplazará el contenido actual.' : '¿Restaurar el diagrama de ejemplo?')) { store.resetDiagram(mode); onClose(); onToast('Diagrama actualizado') } }
-  return <div className="menu-stack"><form onSubmit={rename} className="form-stack"><label>Nombre del diagrama<input autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button></div>
+  return <div className="menu-stack"><form onSubmit={rename} className="form-stack"><label>Nombre del diagrama<input autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button></div>
 }
 
 function customStyle(theme?: CustomTheme): React.CSSProperties | undefined {
