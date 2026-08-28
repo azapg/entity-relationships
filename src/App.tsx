@@ -70,7 +70,6 @@ function syncSystemUi(view: Diagram['view']) {
   document.documentElement.style.setProperty('--system-surface', surface)
   document.documentElement.style.colorScheme = darkSurface ? 'dark' : 'light'
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', surface)
-  document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', darkSurface ? 'black-translucent' : 'default')
 }
 
 function NightingaleMark({ className = '' }: { className?: string }) {
