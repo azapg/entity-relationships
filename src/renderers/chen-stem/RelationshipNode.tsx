@@ -8,10 +8,10 @@ const positionForSide = (side: AttributeSide) => ({
   north: Position.Top, east: Position.Right, south: Position.Bottom, west: Position.Left,
 }[side])
 
-const styleForHandle = (handle: AttributeHandleLayout, width: number, height: number): React.CSSProperties =>
-  handle.side === 'north' || handle.side === 'south'
-    ? { left: handle.offset, top: handle.side === 'north' ? 0 : height }
-    : { left: handle.side === 'east' ? width : 0, top: handle.offset }
+const styleForHandle = (handle: AttributeHandleLayout): React.CSSProperties => ({
+  left: handle.x,
+  top: handle.y,
+})
 
 export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeType>) {
   const width = data.width ?? 96
@@ -27,14 +27,14 @@ export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeT
         <polygon points="48,1 95,48 48,95 1,48" />
       </svg>
       <span className="chen-relationship-node__label">{data.label || 'Sin nombre'}</span>
-      <Handle className="chen-hidden-handle" type="source" position={Position.Top} id="source-top" style={{ left: width / 2, top: 0 }} />
-      <Handle className="chen-hidden-handle" type="source" position={Position.Right} id="source-right" style={{ left: width, top: height / 2 }} />
-      <Handle className="chen-hidden-handle" type="source" position={Position.Bottom} id="source-bottom" style={{ left: width / 2, top: height }} />
-      <Handle className="chen-hidden-handle" type="source" position={Position.Left} id="source-left" style={{ left: 0, top: height / 2 }} />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Top} id="target-top" style={{ left: width / 2, top: 0 }} />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Right} id="target-right" style={{ left: width, top: height / 2 }} />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Bottom} id="target-bottom" style={{ left: width / 2, top: height }} />
-      <Handle className="chen-hidden-handle" type="target" position={Position.Left} id="target-left" style={{ left: 0, top: height / 2 }} />
+      <Handle className="chen-hidden-handle" type="source" position={Position.Top} id="source-top" style={{ left: width / 2, top: 1 }} />
+      <Handle className="chen-hidden-handle" type="source" position={Position.Right} id="source-right" style={{ left: width - 1, top: height / 2 }} />
+      <Handle className="chen-hidden-handle" type="source" position={Position.Bottom} id="source-bottom" style={{ left: width / 2, top: height - 1 }} />
+      <Handle className="chen-hidden-handle" type="source" position={Position.Left} id="source-left" style={{ left: 1, top: height / 2 }} />
+      <Handle className="chen-hidden-handle" type="target" position={Position.Top} id="target-top" style={{ left: width / 2, top: 1 }} />
+      <Handle className="chen-hidden-handle" type="target" position={Position.Right} id="target-right" style={{ left: width - 1, top: height / 2 }} />
+      <Handle className="chen-hidden-handle" type="target" position={Position.Bottom} id="target-bottom" style={{ left: width / 2, top: height - 1 }} />
+      <Handle className="chen-hidden-handle" type="target" position={Position.Left} id="target-left" style={{ left: 1, top: height / 2 }} />
       {attributeHandles.map((handle) => (
         <Handle
           key={handle.id}
@@ -42,7 +42,7 @@ export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeT
           type="source"
           position={positionForSide(handle.side)}
           id={`source-${handle.side}-${handle.id}`}
-          style={styleForHandle(handle, width, height)}
+          style={styleForHandle(handle)}
         />
       ))}
     </div>

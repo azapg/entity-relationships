@@ -15,10 +15,8 @@ const positionForSide = (side: AttributeSide) => ({
   west: Position.Left,
 }[side])
 
-function styleForHandle(handle: AttributeHandleLayout, width: number, height: number): React.CSSProperties {
-  return handle.side === 'north' || handle.side === 'south'
-    ? { left: handle.offset, top: handle.side === 'north' ? 0 : height }
-    : { left: handle.side === 'east' ? width : 0, top: handle.offset }
+function styleForHandle(handle: AttributeHandleLayout): React.CSSProperties {
+  return { left: handle.x, top: handle.y }
 }
 
 export function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
@@ -50,7 +48,7 @@ export function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
           type="source"
           position={positionForSide(handle.side)}
           id={`source-${handle.side}-${handle.id}`}
-          style={styleForHandle(handle, width, height)}
+          style={styleForHandle(handle)}
         />
       ))}
     </div>

@@ -12,6 +12,13 @@ type AttributeNodeType = Node<AttributeNodeData, 'attribute'>
 
 export function AttributeNode({ data, selected }: NodeProps<AttributeNodeType>) {
   const lane = data.side ?? data.lane ?? 'east'
+  const terminalHandleStyle: React.CSSProperties = lane === 'east'
+    ? { left: 0, top: 6, transform: 'none' }
+    : lane === 'west'
+      ? { left: 'auto', right: 0, top: 6, transform: 'none' }
+      : lane === 'north'
+        ? { left: 90, top: 'auto', bottom: 0, transform: 'none' }
+        : { left: 90, top: 0, bottom: 'auto', transform: 'none' }
   return (
     <div
       className={`chen-node chen-attribute-node chen-attribute-node--${lane}${selected || data.selected ? ' is-selected' : ''}`}
@@ -25,6 +32,7 @@ export function AttributeNode({ data, selected }: NodeProps<AttributeNodeType>) 
         type="target"
         position={lane === 'north' ? Position.Bottom : lane === 'east' ? Position.Left : lane === 'south' ? Position.Top : Position.Right}
         id="target-terminal"
+        style={terminalHandleStyle}
       />
     </div>
   )

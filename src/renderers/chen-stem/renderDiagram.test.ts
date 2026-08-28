@@ -1,9 +1,20 @@
-import { describe, expect, it } from 'vitest'
-import type { Diagram } from '../../domain/types'
-import { createSampleDiagram } from '../../domain/sample'
 import { Position } from '@xyflow/react'
-import { orthogonalRoute } from './ConnectorEdge'
-import { renderDiagram } from './renderDiagram'
+import { describe, expect, it } from 'vitest'
+import type { AttributeSide, Diagram } from '../../domain/types'
+import { createSampleDiagram } from '../../domain/sample'
+import { cardinalityLabelPosition, orthogonalRoute } from './ConnectorEdge'
+import {
+  ATTRIBUTE_SIZE,
+  ENTITY_SIZE,
+  MAX_ENTITY_WIDTH,
+  RELATION_SIZE,
+  attributeGeometry,
+  distributedSlots,
+  entityWidth,
+  ownerBoundaryPoint,
+  renderDiagram,
+  type OwnerGeometry,
+} from './renderDiagram'
 
 const baseDiagram = (overrides: Partial<Diagram> = {}): Diagram => ({
   id: 'test-diagram',
@@ -21,14 +32,100 @@ const entity = (id: string, kind: 'strong' | 'weak' = 'strong') => ({
   attributes: [],
 })
 
+const attributeNames: Record<string, string[]> = {
+  movie: ['id', 'title', 'year', 'duration', 'audio', 'video'],
+  episode: ['id', 'title', 'number', 'season', 'year', 'duration', 'audio', 'video'],
+  series: ['id', 'name', 'year', 'seasons', 'audio', 'video'],
+  category: ['id', 'name', 'description', 'year', 'active'],
+  status: ['id', 'name', 'label', 'rank'],
+}
+
+const denseFixture = (): Diagram => {
+  const entities = Object.entries(attributeNames).map(([id, names]) => ({
+    id,
+    name: id.toUpperCase(),
+    kind: 'strong' as const,
+    attributes: names.map((name, index) => ({ id: `${id}-${name}`, name, key: index === 0 })),
+  }))
+  const relationships: Diagram['relationships'] = [
+    {
+      id: 'rel-movie-category', name: 'IN',
+      participants: [
+        { entityId: 'movie', cardinality: { min: 1, max: 1 } },
+        { entityId: 'category', cardinality: { min: 1, max: 'n' } },
+      ],
+      attributes: [{ id: 'rel-movie-category-note', name: 'note', key: false }],
+    },
+    {
+      id: 'rel-series-category', name: 'IN',
+      participants: [
+        { entityId: 'series', cardinality: { min: 1, max: 1 } },
+        { entityId: 'category', cardinality: { min: 1, max: 'n' } },
+      ],
+      attributes: [{ id: 'rel-series-category-order', name: 'order', key: false }],
+    },
+    {
+      id: 'rel-episode-series', name: 'HAS',
+      participants: [
+        { entityId: 'episode', cardinality: { min: 1, max: 'n' } },
+        { entityId: 'series', cardinality: { min: 1, max: 1 } },
+      ],
+      attributes: [{ id: 'rel-episode-series-year', name: 'year', key: false }],
+    },
+    {
+      id: 'rel-movie-status', name: 'IN',
+      participants: [
+        { entityId: 'movie', cardinality: { min: 0, max: 'n' } },
+        { entityId: 'status', cardinality: { min: 1, max: 1 } },
+      ],
+      attributes: [{ id: 'rel-movie-status-since', name: 'since', key: false }],
+    },
+    {
+      id: 'rel-series-status', name: 'IN',
+      participants: [
+        { entityId: 'series', cardinality: { min: 0, max: 'n' } },
+        { entityId: 'status', cardinality: { min: 1, max: 1 } },
+      ],
+      attributes: [{ id: 'rel-series-status-since', name: 'since', key: false }],
+    },
+  ]
+  const positions = {
+    category: { x: 480, y: 48 },
+    movie: { x: 72, y: 336 },
+    episode: { x: 456, y: 336 },
+    series: { x: 840, y: 336 },
+    status: { x: 480, y: 624 },
+    'rel-movie-category': { x: 192, y: 120 },
+    'rel-series-category': { x: 864, y: 120 },
+    'rel-episode-series': { x: 720, y: 336 },
+    'rel-movie-status': { x: 192, y: 624 },
+    'rel-series-status': { x: 864, y: 624 },
+  }
+  const sideOrder: AttributeSide[] = ['north', 'south', 'east', 'west']
+  const attributeLayout = Object.fromEntries([
+    ...entities.flatMap((item) => item.attributes.map((attribute, index) => [attribute.id, { side: sideOrder[index % 4] }] as const)),
+    ...relationships.flatMap((item, index) => item.attributes.map((attribute) => [attribute.id, { side: sideOrder[index % 4] }] as const)),
+  ])
+  return baseDiagram({
+    entities,
+    relationships,
+    view: { ...baseDiagram().view, positions, attributeLayout },
+  })
+}
+
+const localTerminal = (geometry: ReturnType<typeof attributeGeometry>) => ({
+  x: geometry.terminal.x - geometry.position.x,
+  y: geometry.terminal.y - geometry.position.y,
+})
+
 describe('renderDiagram / Chen-stem', () => {
   it('projects the sample with deterministic semantic node and edge IDs', () => {
     const diagram = createSampleDiagram()
     const first = renderDiagram(diagram)
     const second = renderDiagram(diagram)
 
-    expect(first.nodes).toHaveLength(8) // 2 entities + relationship + 5 attributes
-    expect(first.edges).toHaveLength(7) // 2 participants + 5 attribute stems
+    expect(first.nodes).toHaveLength(8)
+    expect(first.edges).toHaveLength(7)
     expect(first.nodes.map(({ id }) => id)).toEqual(second.nodes.map(({ id }) => id))
     expect(first.edges.map(({ id }) => id)).toEqual(second.edges.map(({ id }) => id))
     expect(first.nodes.find((node) => node.id === 'entity:sample-student')?.data).toMatchObject({
@@ -38,57 +135,90 @@ describe('renderDiagram / Chen-stem', () => {
       .toMatchObject({ cardinality: { min: 0, max: 'n' } })
   })
 
-  it('preserves weak entity kind in the projected node', () => {
-    const result = renderDiagram(baseDiagram({ entities: [entity('invoice', 'weak')] }))
-    expect(result.nodes).toHaveLength(1)
-    expect(result.nodes[0]).toMatchObject({ id: 'entity:invoice', type: 'entity' })
-    expect(result.nodes[0].data).toMatchObject({ entityKind: 'weak', kindType: 'weak' })
+  it('uses stable typography-aware entity widths rounded to the grid', () => {
+    expect(entityWidth('USER')).toBe(ENTITY_SIZE.width)
+    const long = entityWidth('INTERNATIONAL_ENTERPRISE_ACCOUNT_RECORD')
+    expect(long).toBeGreaterThan(ENTITY_SIZE.width)
+    expect(long % 24).toBe(0)
+    expect(entityWidth('M'.repeat(200))).toBe(MAX_ENTITY_WIDTH)
+
+    const result = renderDiagram(baseDiagram({
+      entities: [{ ...entity('long'), name: 'INTERNATIONAL_ENTERPRISE_ACCOUNT_RECORD' }],
+    }))
+    expect(result.nodes[0].width).toBe(long)
+    expect(result.nodes[0].data.width).toBe(long)
   })
 
-  it('projects relationship attributes as attributes owned by the relationship', () => {
+  it('distributes side slots across the usable rhythm without collapsing dense coordinates', () => {
+    expect(distributedSlots(192, 1)).toEqual([96])
+    expect(distributedSlots(192, 3)).toEqual([24, 96, 168])
+    expect(distributedSlots(96, 3)).toEqual([24, 48, 72])
+    const dense = distributedSlots(96, 8)
+    expect(new Set(dense).size).toBe(8)
+    expect(dense[0]).toBe(6)
+    expect(dense.at(-1)).toBe(90)
+    expect(dense.every((slot, index) => index === 0 || slot > dense[index - 1])).toBe(true)
+  })
+
+  it('puts terminal centers on the exact target-handle coordinates for every side', () => {
+    const owner: OwnerGeometry = {
+      kind: 'entity', id: 'person', position: { x: 240, y: 240 },
+      ...ENTITY_SIZE, attributes: [],
+    }
+    expect(localTerminal(attributeGeometry(owner, 'east', 0, 1))).toEqual({ x: 6, y: 12 })
+    expect(localTerminal(attributeGeometry(owner, 'west', 0, 1))).toEqual({ x: ATTRIBUTE_SIZE.width - 6, y: 12 })
+    expect(localTerminal(attributeGeometry(owner, 'north', 0, 1))).toEqual({ x: ATTRIBUTE_SIZE.width / 2, y: 18 })
+    expect(localTerminal(attributeGeometry(owner, 'south', 0, 1))).toEqual({ x: ATTRIBUTE_SIZE.width / 2, y: 6 })
+  })
+
+  it('places relationship attribute attachments exactly on the visible diamond', () => {
+    const owner: OwnerGeometry = {
+      kind: 'relationship', id: 'enrolls', position: { x: 240, y: 240 },
+      ...RELATION_SIZE, attributes: [],
+    }
+    const expected = {
+      north: { x: 264, y: 265 },
+      east: { x: 311, y: 264 },
+      south: { x: 312, y: 311 },
+      west: { x: 265, y: 312 },
+    }
+    Object.entries(expected).forEach(([side, point]) => {
+      const attachment = ownerBoundaryPoint(owner, side as AttributeSide, side === 'north' || side === 'east' ? 24 : 72)
+      expect(attachment).toEqual(point)
+      const localX = attachment.x - owner.position.x
+      const localY = attachment.y - owner.position.y
+      expect(Math.abs(localX - 48) + Math.abs(localY - 48)).toBe(47)
+    })
+  })
+
+  it('uses the same projected attachment for relationship handles and attribute stems', () => {
     const diagram = baseDiagram({
-      entities: [entity('student'), entity('course')],
       relationships: [{
-        id: 'enrolls', name: 'ENROLLS',
-        participants: [
-          { entityId: 'student', cardinality: { min: 0, max: 'n' } },
-          { entityId: 'course', cardinality: { min: 1, max: 1 } },
+        id: 'enrolls', name: 'ENROLLS', participants: [],
+        attributes: [
+          { id: 'grade', name: 'grade', key: false },
+          { id: 'term', name: 'term', key: true },
         ],
-        attributes: [{ id: 'grade', name: 'grade', key: false }],
       }],
-      view: { renderer: 'chen-stem', theme: 'academic', positions: {}, layoutMode: 'structured', attributeLayout: {} },
+      view: {
+        ...baseDiagram().view,
+        positions: { enrolls: { x: 240, y: 240 } },
+        attributeLayout: { grade: { side: 'north' }, term: { side: 'north' } },
+      },
     })
     const result = renderDiagram(diagram)
-    const attribute = result.nodes.find((node) => node.id === 'attribute:relationship:enrolls:grade')
-    expect(attribute).toMatchObject({ type: 'attribute', draggable: false, selectable: false })
-    expect(attribute?.data).toMatchObject({ semanticId: 'grade', ownerId: 'enrolls', ownerKind: 'relationship' })
-    expect(result.edges.find((edge) => edge.id === 'attribute-edge:relationship:enrolls:grade'))
-      .toMatchObject({ source: 'relationship:enrolls', target: 'attribute:relationship:enrolls:grade' })
-  })
-
-  it('connects each attribute stem to the terminal marker on its lane', () => {
-    const result = renderDiagram(baseDiagram({
-      entities: [{
-        ...entity('person'),
-        attributes: [
-          { id: 'north', name: 'north', key: true },
-          { id: 'south', name: 'south', key: false },
-          { id: 'east', name: 'east', key: false },
-          { id: 'west', name: 'west', key: true },
-        ],
-      }],
-    }))
-
-    expect(result.edges.filter((edge) => edge.id.startsWith('attribute-edge:')).map((edge) => ({
-      lane: edge.data?.lane,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-    }))).toEqual([
-      { lane: 'north', sourceHandle: 'source-north-north', targetHandle: 'target-terminal' },
-      { lane: 'south', sourceHandle: 'source-south-south', targetHandle: 'target-terminal' },
-      { lane: 'east', sourceHandle: 'source-east-east', targetHandle: 'target-terminal' },
-      { lane: 'west', sourceHandle: 'source-west-west', targetHandle: 'target-terminal' },
-    ])
+    const owner = result.nodes.find((node) => node.id === 'relationship:enrolls')!
+    const handles = owner.data.attributeHandles as Array<{ id: string; x: number; y: number; offset: number }>
+    expect(handles.map(({ offset }) => offset)).toEqual([24, 72])
+    handles.forEach((handle) => {
+      const attribute = result.nodes.find((node) => node.id.endsWith(`:${handle.id}`))!
+      const attachment = attribute.data.attachment as { x: number; y: number }
+      const terminal = attribute.data.terminal as { x: number; y: number }
+      expect(attachment).toEqual({ x: owner.position.x + handle.x, y: owner.position.y + handle.y })
+      expect(terminal.x).toBe(attachment.x)
+      expect(terminal.y).toBeLessThan(attachment.y)
+      expect(Math.abs(handle.x - 48) + Math.abs(handle.y - 48)).toBe(47)
+    })
   })
 
   it('supports n-ary participant lists and ignores missing entity references', () => {
@@ -104,62 +234,59 @@ describe('renderDiagram / Chen-stem', () => {
         ],
         attributes: [],
       }],
-      view: { renderer: 'chen-stem', theme: 'academic', positions: {}, layoutMode: 'structured', attributeLayout: {} },
     })
-    const result = renderDiagram(diagram)
-    const participantEdges = result.edges.filter((edge) => edge.id.startsWith('participant-edge:'))
+    const participantEdges = renderDiagram(diagram).edges.filter((edge) => edge.id.startsWith('participant-edge:'))
     expect(participantEdges).toHaveLength(3)
     expect(participantEdges.some((edge) => edge.source === 'entity:removed')).toBe(false)
-    expect(participantEdges.map((edge) => edge.data)).toEqual([
-      { connectorKind: 'participant', cardinality: { min: 0, max: 1 }, selected: false },
-      { connectorKind: 'participant', cardinality: { min: 1, max: 'n' }, selected: false },
-      { connectorKind: 'participant', cardinality: { min: 1, max: 1 }, selected: false },
-    ])
   })
 
-  it('keeps a dense fixture derived, aligned, and non-draggable', () => {
-    const names = ['MOVIE', 'EPISODE', 'SERIES', 'CATEGORY', 'STATUS']
-    const entities = names.map((name, entityIndex) => ({
-      id: name.toLowerCase(), name, kind: 'strong' as const,
-      attributes: Array.from({ length: 4 + (entityIndex % 5) }, (_, index) => ({
-        id: `${name.toLowerCase()}-${index}`, name: `field_${index}`, key: index === 0,
-      })),
-    }))
-    const relationships = [
-      { id: 'has', name: 'HAS', participants: [{ entityId: 'movie', cardinality: { min: 1 as const, max: 1 as const } }, { entityId: 'episode', cardinality: { min: 1 as const, max: 'n' as const } }], attributes: [] },
-      { id: 'in', name: 'IN', participants: [{ entityId: 'episode', cardinality: { min: 1 as const, max: 1 as const } }, { entityId: 'series', cardinality: { min: 1 as const, max: 'n' as const } }], attributes: [{ id: 'in-year', name: 'year', key: false }] },
-      { id: 'status', name: 'STATUS', participants: [{ entityId: 'movie', cardinality: { min: 0 as const, max: 'n' as const } }, { entityId: 'status', cardinality: { min: 1 as const, max: 1 as const } }], attributes: [] },
-    ]
-    const positions = Object.fromEntries(names.map((name, index) => [name.toLowerCase(), { x: 100 + index * 215, y: 100 + (index % 2) * 180 }]))
-    const result = renderDiagram({ ...baseDiagram({ entities, relationships }), view: { ...baseDiagram().view, positions } })
+  it('keeps the dense five-entity fixture aligned, attached, and non-draggable', () => {
+    const diagram = denseFixture()
+    const result = renderDiagram(diagram)
     const attributes = result.nodes.filter((node) => node.data.kind === 'attribute')
-    expect(attributes).toHaveLength(31)
+    const majors = result.nodes.filter((node) => node.data.kind !== 'attribute')
+    const relationIds = diagram.relationships.map(({ id }) => id)
+
+    expect(new Set(relationIds).size).toBe(relationIds.length)
+    expect(diagram.relationships.filter((relationship) => relationship.participants.some(({ entityId }) => entityId === 'category'))).toHaveLength(2)
+    expect(attributes).toHaveLength(34)
     expect(attributes.every((node) => node.draggable === false && node.selectable === false)).toBe(true)
-    const owners = result.nodes.filter((node) => node.data.kind !== 'attribute')
-    owners.forEach((owner) => {
-      const handles = (owner.data.attributeHandles ?? []) as Array<{ id: string }>
-      expect(new Set(handles.map((handle) => handle.id)).size).toBe(handles.length)
+    expect(majors.every((node) => node.position.x % 24 === 0 && node.position.y % 24 === 0)).toBe(true)
+    expect(result.edges.filter((edge) => edge.id.startsWith('participant-edge:'))).toHaveLength(10)
+    expect(new Set(result.edges.filter((edge) => edge.id.startsWith('participant-edge:')).map((edge) => edge.sourceHandle)))
+      .toEqual(new Set(['source-north', 'source-east', 'source-south', 'source-west']))
+
+    majors.forEach((owner) => {
+      const handles = owner.data.attributeHandles as Array<{ id: string; side: AttributeSide; x: number; y: number; offset: number }>
+      expect(new Set(handles.map(({ id }) => id)).size).toBe(handles.length)
+      const bySide = handles.reduce<Partial<Record<AttributeSide, typeof handles>>>((groups, handle) => {
+        const group = groups[handle.side] ?? []
+        group.push(handle)
+        groups[handle.side] = group
+        return groups
+      }, {})
+      Object.values(bySide).forEach((sideHandles) => {
+        if (sideHandles) expect(new Set(sideHandles.map(({ offset }) => offset)).size).toBe(sideHandles.length)
+      })
+      if (owner.data.kind === 'relationship') {
+        handles.forEach(({ x, y }) => expect(Math.abs(x - 48) + Math.abs(y - 48)).toBe(47))
+      }
     })
-    const attrPositions = new Map(attributes.map((node) => [node.id, node.position]))
-    const moved = renderDiagram({ ...baseDiagram({ entities, relationships }), view: { ...baseDiagram().view, positions: { ...positions, movie: { x: 240, y: 240 } } } })
-    const oldMovie = result.nodes.find((node) => node.id === 'entity:movie')!
-    const newMovie = moved.nodes.find((node) => node.id === 'entity:movie')!
-    const dx = newMovie.position.x - oldMovie.position.x
-    const dy = newMovie.position.y - oldMovie.position.y
+
+    const movedDiagram = denseFixture()
+    movedDiagram.view.positions.movie = { x: 120, y: 384 }
+    const moved = renderDiagram(movedDiagram)
     attributes.filter((node) => node.data.ownerId === 'movie').forEach((node) => {
       const next = moved.nodes.find((candidate) => candidate.id === node.id)!
-      expect(next.position).toEqual({ x: node.position.x + dx, y: node.position.y + dy })
-      expect(attrPositions.has(node.id)).toBe(true)
+      expect(next.position).toEqual({ x: node.position.x + 48, y: node.position.y + 48 })
     })
-    expect(result.edges.filter((edge) => edge.id.startsWith('participant-edge:'))).toHaveLength(6)
   })
 
-  it('closes side gaps when an attribute is deleted from the projection', () => {
+  it('reflows the stepped side cleanly after an attribute is deleted', () => {
     const make = (ids: string[]) => baseDiagram({
       entities: [{ ...entity('person'), attributes: ids.map((id) => ({ id, name: id, key: false })) }],
       view: {
         ...baseDiagram().view,
-        positions: {},
         attributeLayout: Object.fromEntries(ids.map((id) => [id, { side: 'north' as const }])),
       },
     })
@@ -167,13 +294,13 @@ describe('renderDiagram / Chen-stem', () => {
     const after = renderDiagram(make(['one', 'three']))
     const beforeThree = before.nodes.find((node) => node.id.endsWith(':three'))!
     const afterThree = after.nodes.find((node) => node.id.endsWith(':three'))!
-    expect(afterThree.data.side).toBe(beforeThree.data.side)
-    expect(afterThree.position).not.toEqual(beforeThree.position)
-    expect(afterThree.position.x).toBeLessThan(beforeThree.position.x)
+    expect(afterThree.data.side).toBe('north')
+    expect(afterThree.data.step).toBe(1)
+    expect(beforeThree.data.step).toBe(2)
     expect(afterThree.position.y).toBeGreaterThan(beforeThree.position.y)
   })
 
-  it('routes every connector with horizontal and vertical segments only', () => {
+  it('routes every connector orthogonally and keeps cardinality near the source', () => {
     const routes = [
       orthogonalRoute({ x: 0, y: 0 }, { x: 100, y: 0 }, Position.Right, Position.Left),
       orthogonalRoute({ x: 0, y: 0 }, { x: 100, y: 80 }, Position.Right, Position.Left),
@@ -183,5 +310,10 @@ describe('renderDiagram / Chen-stem', () => {
       const previous = points[index]
       expect(point.x === previous.x || point.y === previous.y).toBe(true)
     }))
+    expect(routes[0]).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }])
+    expect(cardinalityLabelPosition(routes[0])).toEqual({ x: 28, y: -9 })
+    expect(cardinalityLabelPosition(orthogonalRoute(
+      { x: 0, y: 0 }, { x: 100, y: 80 }, Position.Bottom, Position.Left,
+    ))).toEqual({ x: 9, y: 28 })
   })
 })

@@ -8,6 +8,10 @@ export type AttributeSide = 'north' | 'east' | 'south' | 'west'
 export type AttributeHandleLayout = {
   id: string
   side: AttributeSide
+  /** Local owner coordinates of the exact visible attachment point. */
+  x: number
+  y: number
+  /** Axis offset retained for inspection/debugging. */
   offset: number
 }
 

@@ -3,18 +3,20 @@ import type { Attribute, Diagram, Point } from '../../domain/types'
 import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, DiagramNodeData, RenderedDiagram } from '../types'
 
-/** Dimensions are deliberately multiples of the shared 24px rhythm. */
+/** Fixed dimensions and spacing follow the shared 24px rhythm. */
 export const ENTITY_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE * 4 }
 export const RELATION_SIZE = { width: GRID_SIZE * 4, height: GRID_SIZE * 4 }
 export const ATTRIBUTE_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE }
 export const ATTRIBUTE_GAP = GRID_SIZE
 export const TERMINAL_SIZE = 12
+export const MAX_ENTITY_WIDTH = GRID_SIZE * 20
+export const DIAMOND_INSET = 1
 
 // Semantic order is also the stable tie-break for automatic placement.
 export const SIDES: readonly AttributeSide[] = ['north', 'south', 'east', 'west']
 
 type OwnerKind = 'entity' | 'relationship'
-type Owner = {
+export type OwnerGeometry = {
   kind: OwnerKind
   id: string
   position: Point
@@ -28,6 +30,11 @@ type ViewWithLayout = Diagram['view'] & {
   attributeLayout?: Record<string, { side: AttributeSide } | AttributeSide>
 }
 
+type ProjectedAttribute = {
+  attribute: Attribute
+  geometry: AttributeGeometry
+}
+
 const nodeId = (kind: OwnerKind, id: string) => `${kind}:${id}`
 export const attrNodeId = (kind: OwnerKind, ownerId: string, attributeId: string) =>
   `attribute:${kind}:${ownerId}:${attributeId}`
@@ -36,6 +43,22 @@ export const snapPoint = (point: Point, grid = GRID_SIZE): Point => ({
   x: Math.round(point.x / grid) * grid,
   y: Math.round(point.y / grid) * grid,
 })
+
+const roundUpToGrid = (value: number) => Math.ceil(value / GRID_SIZE) * GRID_SIZE
+
+/** Estimate text width without DOM measurement. This avoids React Flow
+ * measurement/reprojection loops while still giving long entity names room. */
+export function entityWidth(label: string, font: 'serif' | 'sans' = 'serif'): number {
+  const textWidth = Array.from(label.trim() || 'Sin nombre').reduce((sum, character) => {
+    if (/\s/.test(character)) return sum + 5
+    if (/[MW@#%&]/.test(character)) return sum + (font === 'serif' ? 13 : 12)
+    if (/[ilI1|.,'`]/.test(character)) return sum + (font === 'serif' ? 5.5 : 5)
+    if (/[A-ZÁÉÍÓÚÜÑ]/.test(character)) return sum + (font === 'serif' ? 9.5 : 9)
+    return sum + (font === 'serif' ? 8.5 : 8)
+  }, 0)
+  const padded = roundUpToGrid(textWidth + GRID_SIZE * 2)
+  return Math.max(ENTITY_SIZE.width, Math.min(MAX_ENTITY_WIDTH, padded))
+}
 
 function center(position: Point, width: number, height: number): Point {
   return { x: position.x + width / 2, y: position.y + height / 2 }
@@ -91,14 +114,64 @@ export function allocateAttributeSides(
   return result
 }
 
-function slotOffset(ownerSize: number, index: number): number {
-  // Start one grid unit in from the boundary. This gives exact, repeatable
-  // attachment points for the normal 192x96 and 96x96 owner boxes.
-  const offset = GRID_SIZE * (index + 1)
-  // Allow the final slot to land on the far boundary (rather than collapsing
-  // two attributes onto one point when a user deliberately keeps many attrs
-  // on one side).
-  return Math.min(Math.max(GRID_SIZE, offset), Math.max(GRID_SIZE, ownerSize))
+/** Distribute attachment points across the usable side. When enough grid
+ * slots exist every point is exactly on-grid; dense one-side assignments fall
+ * back to even half-grid-margined spacing without collapsing coordinates. */
+export function distributedSlots(ownerSize: number, count: number): number[] {
+  if (count <= 0) return []
+  if (count === 1) return [Math.round(ownerSize / (GRID_SIZE * 2)) * GRID_SIZE]
+
+  const firstUnit = 1
+  const lastUnit = Math.max(firstUnit, Math.floor(ownerSize / GRID_SIZE) - 1)
+  const gridCapacity = lastUnit - firstUnit + 1
+  if (count <= gridCapacity) {
+    return Array.from({ length: count }, (_, index) => {
+      const unit = firstUnit + Math.round(index * (lastUnit - firstUnit) / (count - 1))
+      return unit * GRID_SIZE
+    })
+  }
+
+  const margin = TERMINAL_SIZE / 2
+  const usable = Math.max(0, ownerSize - margin * 2)
+  return Array.from({ length: count }, (_, index) => margin + index * usable / (count - 1))
+}
+
+/** Exact visible owner boundary for an attribute stem. Relationship points
+ * lie on the SVG polygon, rather than the surrounding 96px layout square. */
+export function ownerBoundaryPoint(owner: OwnerGeometry, side: AttributeSide, slot: number): Point {
+  if (owner.kind === 'entity') {
+    if (side === 'north') return { x: owner.position.x + slot, y: owner.position.y }
+    if (side === 'south') return { x: owner.position.x + slot, y: owner.position.y + owner.height }
+    if (side === 'east') return { x: owner.position.x + owner.width, y: owner.position.y + slot }
+    return { x: owner.position.x, y: owner.position.y + slot }
+  }
+
+  const cx = owner.width / 2
+  const cy = owner.height / 2
+  const horizontalSlope = (cy - DIAMOND_INSET) / (cx - DIAMOND_INSET)
+  const verticalSlope = (cx - DIAMOND_INSET) / (cy - DIAMOND_INSET)
+  if (side === 'north') {
+    return {
+      x: owner.position.x + slot,
+      y: owner.position.y + DIAMOND_INSET + Math.abs(slot - cx) * horizontalSlope,
+    }
+  }
+  if (side === 'south') {
+    return {
+      x: owner.position.x + slot,
+      y: owner.position.y + owner.height - DIAMOND_INSET - Math.abs(slot - cx) * horizontalSlope,
+    }
+  }
+  if (side === 'east') {
+    return {
+      x: owner.position.x + owner.width - DIAMOND_INSET - Math.abs(slot - cy) * verticalSlope,
+      y: owner.position.y + slot,
+    }
+  }
+  return {
+    x: owner.position.x + DIAMOND_INSET + Math.abs(slot - cy) * verticalSlope,
+    y: owner.position.y + slot,
+  }
 }
 
 export type AttributeGeometry = {
@@ -110,61 +183,71 @@ export type AttributeGeometry = {
   attachment: Point
 }
 
-/** Pure geometry for a renderer-managed attribute. The terminal and owner
- * attachment share an axis, so the stem is always a straight H/V segment. */
-export function attributeGeometry(owner: Owner, side: AttributeSide, sideIndex: number): AttributeGeometry {
-  const slot = slotOffset(side === 'north' || side === 'south' ? owner.width : owner.height, sideIndex)
+/** Pure geometry for a renderer-managed attribute. The terminal and visible
+ * owner boundary share an axis, so the stem is always a straight H/V line. */
+export function attributeGeometry(
+  owner: OwnerGeometry,
+  side: AttributeSide,
+  sideIndex: number,
+  sideCount = Math.max(1, sideIndex + 1),
+): AttributeGeometry {
+  const ownerSize = side === 'north' || side === 'south' ? owner.width : owner.height
+  const slot = distributedSlots(ownerSize, sideCount)[sideIndex]
   const step = sideIndex
-  const cx = owner.position.x + slot
-  const cy = owner.position.y + slot
-  let position: Point
+  const attachment = ownerBoundaryPoint(owner, side, slot)
   let terminal: Point
-  let attachment: Point
+  let position: Point
   if (side === 'north') {
-    terminal = { x: cx, y: owner.position.y - ATTRIBUTE_GAP - step * GRID_SIZE }
-    position = { x: cx - ATTRIBUTE_SIZE.width / 2, y: terminal.y - ATTRIBUTE_SIZE.height + TERMINAL_SIZE / 2 }
-    attachment = { x: cx, y: owner.position.y }
+    terminal = { x: attachment.x, y: attachment.y - ATTRIBUTE_GAP - step * GRID_SIZE }
+    position = { x: terminal.x - ATTRIBUTE_SIZE.width / 2, y: terminal.y - ATTRIBUTE_SIZE.height + TERMINAL_SIZE / 2 }
   } else if (side === 'south') {
-    terminal = { x: cx, y: owner.position.y + owner.height + ATTRIBUTE_GAP + step * GRID_SIZE }
-    position = { x: cx - ATTRIBUTE_SIZE.width / 2, y: terminal.y - TERMINAL_SIZE / 2 }
-    attachment = { x: cx, y: owner.position.y + owner.height }
+    terminal = { x: attachment.x, y: attachment.y + ATTRIBUTE_GAP + step * GRID_SIZE }
+    position = { x: terminal.x - ATTRIBUTE_SIZE.width / 2, y: terminal.y - TERMINAL_SIZE / 2 }
   } else if (side === 'east') {
-    terminal = { x: owner.position.x + owner.width + ATTRIBUTE_GAP, y: cy }
-    position = { x: terminal.x - TERMINAL_SIZE / 2, y: cy - ATTRIBUTE_SIZE.height / 2 }
-    attachment = { x: owner.position.x + owner.width, y: cy }
+    terminal = { x: attachment.x + ATTRIBUTE_GAP, y: attachment.y }
+    position = { x: terminal.x - TERMINAL_SIZE / 2, y: terminal.y - ATTRIBUTE_SIZE.height / 2 }
   } else {
-    terminal = { x: owner.position.x - ATTRIBUTE_GAP, y: cy }
-    position = { x: terminal.x - ATTRIBUTE_SIZE.width + TERMINAL_SIZE / 2, y: cy - ATTRIBUTE_SIZE.height / 2 }
-    attachment = { x: owner.position.x, y: cy }
+    terminal = { x: attachment.x - ATTRIBUTE_GAP, y: attachment.y }
+    position = { x: terminal.x - ATTRIBUTE_SIZE.width + TERMINAL_SIZE / 2, y: terminal.y - ATTRIBUTE_SIZE.height / 2 }
   }
   return { position, side, slot, step, terminal, attachment }
 }
 
 const handleId = (side: AttributeSide, attributeId: string) => `source-${side}-${attributeId}`
 
-function handlesFor(owner: Owner, attributes: Attribute[], assignments: Record<string, AttributeSide>) {
-  const sideIndices: Record<AttributeSide, number> = { north: 0, east: 0, south: 0, west: 0 }
-  return attributes.map((attribute) => {
+export function ownerAttributeGeometries(
+  owner: OwnerGeometry,
+  assignments: Record<string, AttributeSide>,
+): ProjectedAttribute[] {
+  const counts: Record<AttributeSide, number> = { north: 0, east: 0, south: 0, west: 0 }
+  owner.attributes.forEach((attribute) => { counts[assignments[attribute.id]] += 1 })
+  const indices: Record<AttributeSide, number> = { north: 0, east: 0, south: 0, west: 0 }
+  return owner.attributes.map((attribute) => {
     const side = assignments[attribute.id]
-    const index = sideIndices[side]++
-    const geometry = attributeGeometry(owner, side, index)
-    return { id: attribute.id, side, offset: geometry.slot }
+    return { attribute, geometry: attributeGeometry(owner, side, indices[side]++, counts[side]) }
   })
 }
 
+function handlesFor(owner: OwnerGeometry, projected: ProjectedAttribute[]) {
+  return projected.map(({ attribute, geometry }) => ({
+    id: attribute.id,
+    side: geometry.side,
+    offset: geometry.slot,
+    x: geometry.attachment.x - owner.position.x,
+    y: geometry.attachment.y - owner.position.y,
+  }))
+}
+
 function ownerAttributes(
-  owner: Owner,
+  owner: OwnerGeometry,
   selectedId: string | undefined,
-  assignments: Record<string, AttributeSide>,
+  projected: ProjectedAttribute[],
   nodes: Node<DiagramNodeData>[],
   edges: Edge[],
 ) {
-  const sideIndices: Record<AttributeSide, number> = { north: 0, east: 0, south: 0, west: 0 }
-  owner.attributes.forEach((attribute) => {
-    const side = assignments[attribute.id]
-    const geometry = attributeGeometry(owner, side, sideIndices[side]++)
+  projected.forEach(({ attribute, geometry }) => {
+    const side = geometry.side
     const id = attrNodeId(owner.kind, owner.id, attribute.id)
-    const semanticOwnerId = nodeId(owner.kind, owner.id)
     nodes.push({
       id,
       type: 'attribute',
@@ -185,12 +268,14 @@ function ownerAttributes(
         side,
         lane: side,
         step: geometry.step,
+        terminal: geometry.terminal,
+        attachment: geometry.attachment,
       },
     })
     edges.push({
       id: `attribute-edge:${owner.kind}:${owner.id}:${attribute.id}`,
       type: 'connector',
-      source: semanticOwnerId,
+      source: nodeId(owner.kind, owner.id),
       target: id,
       sourceHandle: handleId(side, attribute.id),
       targetHandle: 'target-terminal',
@@ -202,7 +287,12 @@ function ownerAttributes(
 
 type ConnectionMap = Map<string, Partial<Record<AttributeSide, number>>>
 
-function connectionSides(diagram: Diagram, positions: Map<string, Point>): ConnectionMap {
+function connectionSides(
+  diagram: Diagram,
+  entityPositions: Map<string, Point>,
+  relationshipPositions: Map<string, Point>,
+  entityWidths: Map<string, number>,
+): ConnectionMap {
   const result: ConnectionMap = new Map()
   const increment = (id: string, side: AttributeSide) => {
     const current = result.get(id) ?? {}
@@ -210,21 +300,23 @@ function connectionSides(diagram: Diagram, positions: Map<string, Point>): Conne
     result.set(id, current)
   }
   diagram.relationships.forEach((relationship) => {
-    const relationPosition = positions.get(relationship.id)
-    if (!relationPosition) return
-    const relationCenter = center(relationPosition, RELATION_SIZE.width, RELATION_SIZE.height)
+    const relationshipPosition = relationshipPositions.get(relationship.id)
+    if (!relationshipPosition) return
+    const relationshipCenter = center(relationshipPosition, RELATION_SIZE.width, RELATION_SIZE.height)
     relationship.participants.forEach((participant) => {
-      const entityPosition = positions.get(participant.entityId)
-      if (!entityPosition) return
-      const entityCenter = center(entityPosition, ENTITY_SIZE.width, ENTITY_SIZE.height)
-      increment(participant.entityId, sideFor(entityCenter, relationCenter))
-      increment(relationship.id, oppositeSide(sideFor(entityCenter, relationCenter)))
+      const entityPosition = entityPositions.get(participant.entityId)
+      const width = entityWidths.get(participant.entityId)
+      if (!entityPosition || !width) return
+      const entityCenter = center(entityPosition, width, ENTITY_SIZE.height)
+      const entitySide = sideFor(entityCenter, relationshipCenter)
+      increment(participant.entityId, entitySide)
+      increment(relationship.id, oppositeSide(entitySide))
     })
   })
   return result
 }
 
-/** Projects the semantic model into a disposable React Flow graph. Attribute
+/** Projects semantic data into a disposable React Flow graph. Attribute
  * positions are always derived here; no attribute coordinates are persisted. */
 export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDiagram {
   const nodes: Node<DiagramNodeData>[] = []
@@ -235,16 +327,20 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
   const normalizedPosition = (position: Point) => structured ? snapPoint(position) : position
   const entityPositions = new Map<string, Point>()
   const relationshipPositions = new Map<string, Point>()
+  const entityWidths = new Map<string, number>()
+  const font = view.theme === 'modern' || (view.theme === 'custom' && view.customTheme?.font === 'sans') ? 'sans' : 'serif'
 
   diagram.entities.forEach((entity, index) => {
     const position = normalizedPosition(positions[entity.id] ?? { x: GRID_SIZE * (5 + index * 10), y: GRID_SIZE * 6 })
+    const width = entityWidth(entity.name, font)
     entityPositions.set(entity.id, position)
+    entityWidths.set(entity.id, width)
     nodes.push({
       id: nodeId('entity', entity.id), type: 'entity', position,
-      width: ENTITY_SIZE.width, height: ENTITY_SIZE.height, draggable: true,
+      width, height: ENTITY_SIZE.height, draggable: true,
       data: {
         semanticId: entity.id, kind: 'entity', label: entity.name, selected: selectedFor(selectedId, entity.id),
-        entityKind: entity.kind, kindType: entity.kind, width: ENTITY_SIZE.width, height: ENTITY_SIZE.height,
+        entityKind: entity.kind, kindType: entity.kind, width, height: ENTITY_SIZE.height,
       },
     })
   })
@@ -262,24 +358,29 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     })
   })
 
-  const allPositions = new Map([...entityPositions, ...relationshipPositions])
-  const occupied = connectionSides(diagram, allPositions)
+  const occupied = connectionSides(diagram, entityPositions, relationshipPositions, entityWidths)
   const assignments = view.attributeLayout ?? {}
   diagram.entities.forEach((entity) => {
     const sides = allocateAttributeSides(entity.attributes, assignments, occupied.get(entity.id))
-    const owner: Owner = { kind: 'entity', id: entity.id, position: entityPositions.get(entity.id)!, ...ENTITY_SIZE, attributes: entity.attributes }
-    const handles = handlesFor(owner, entity.attributes, sides)
+    const owner: OwnerGeometry = {
+      kind: 'entity', id: entity.id, position: entityPositions.get(entity.id)!,
+      width: entityWidths.get(entity.id)!, height: ENTITY_SIZE.height, attributes: entity.attributes,
+    }
+    const projected = ownerAttributeGeometries(owner, sides)
     const node = nodes.find((candidate) => candidate.id === nodeId('entity', entity.id))
-    if (node) node.data.attributeHandles = handles
-    ownerAttributes(owner, selectedId, sides, nodes, edges)
+    if (node) node.data.attributeHandles = handlesFor(owner, projected)
+    ownerAttributes(owner, selectedId, projected, nodes, edges)
   })
   diagram.relationships.forEach((relationship) => {
     const sides = allocateAttributeSides(relationship.attributes, assignments, occupied.get(relationship.id))
-    const owner: Owner = { kind: 'relationship', id: relationship.id, position: relationshipPositions.get(relationship.id)!, ...RELATION_SIZE, attributes: relationship.attributes }
-    const handles = handlesFor(owner, relationship.attributes, sides)
+    const owner: OwnerGeometry = {
+      kind: 'relationship', id: relationship.id, position: relationshipPositions.get(relationship.id)!,
+      ...RELATION_SIZE, attributes: relationship.attributes,
+    }
+    const projected = ownerAttributeGeometries(owner, sides)
     const node = nodes.find((candidate) => candidate.id === nodeId('relationship', relationship.id))
-    if (node) node.data.attributeHandles = handles
-    ownerAttributes(owner, selectedId, sides, nodes, edges)
+    if (node) node.data.attributeHandles = handlesFor(owner, projected)
+    ownerAttributes(owner, selectedId, projected, nodes, edges)
   })
 
   const byId = new Map(diagram.entities.map((entity) => [entity.id, entity]))
@@ -287,10 +388,10 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     relationship.participants.forEach((participant, index) => {
       if (!byId.has(participant.entityId)) return
       const entityPosition = entityPositions.get(participant.entityId)!
-      const relationPosition = relationshipPositions.get(relationship.id)!
+      const relationshipPosition = relationshipPositions.get(relationship.id)!
       const side = sideFor(
-        center(entityPosition, ENTITY_SIZE.width, ENTITY_SIZE.height),
-        center(relationPosition, RELATION_SIZE.width, RELATION_SIZE.height),
+        center(entityPosition, entityWidths.get(participant.entityId)!, ENTITY_SIZE.height),
+        center(relationshipPosition, RELATION_SIZE.width, RELATION_SIZE.height),
       )
       edges.push({
         id: `participant-edge:${relationship.id}:${participant.entityId}:${index}`,
