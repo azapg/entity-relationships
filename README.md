@@ -33,6 +33,6 @@ bun run preview
 
 ## GitHub Pages
 
-El workflow `.github/workflows/deploy-pages.yml` construye y publica `dist` al hacer push a `main`. En GitHub, selecciona **Settings → Pages → Source → GitHub Actions**.
+El workflow `.github/workflows/deploy-pages.yml` construye y publica `dist` al hacer push a `main`. La configuración de Pages usa GitHub Actions como fuente de publicación.
 
-La ruta base de producción está configurada como `/er-diagrams/` en `vite.config.ts`. Si cambia el nombre del repositorio, cambia esa única cadena.
+La ruta base de producción está configurada como `/entity-relationships/` en `vite.config.ts`. Si cambia el nombre del repositorio, cambia esa única cadena.

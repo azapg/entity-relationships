@@ -18,10 +18,11 @@
   border: var(--stroke-width, 1.35px) solid var(--entity-stroke, var(--ink, #25231f));
   background: var(--entity-fill, #fbfaf6);
   text-align: center;
+  --handle-inset: 1px;
   transition: box-shadow 140ms ease, background-color 140ms ease;
 }
 
-.chen-entity-node--weak { border-width: 2px; }
+.chen-entity-node--weak { border-width: 2px; --handle-inset: 2px; }
 .chen-entity-node > .chen-node__label {
   max-width: 100%;
   overflow: hidden;
@@ -58,11 +59,13 @@
 }
 .chen-relationship-node__label {
   position: relative;
-  max-width: 72px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: max-content;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
   text-align: center;
   white-space: nowrap;
+  transform-origin: center;
 }
 
 /* The attribute box is an invisible 8-grid-unit canvas. The terminal is
@@ -114,6 +117,56 @@
 }
 .chen-attribute-node.is-selected { background: color-mix(in srgb, var(--entity-fill, #fbfaf6) 85%, var(--ink, #25231f)); }
 
+.chen-node-toolbar {
+  z-index: 20;
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--ink, #25231f) 14%, transparent);
+  border-radius: 9px;
+  background: var(--panel, #fffdf8);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--ink, #25231f) 16%, transparent);
+  white-space: nowrap;
+}
+.chen-node-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--ink, #25231f);
+  background: transparent;
+  font: 11px/1 system-ui, sans-serif;
+}
+.chen-node-toolbar button:hover,
+.chen-node-toolbar button:focus-visible { background: color-mix(in srgb, var(--accent, #6b5540) 12%, transparent); }
+.chen-node-toolbar button.is-danger { color: #a14f48; }
+.chen-hover-actions {
+  z-index: 30;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--ink, #25231f) 12%, transparent);
+  border-radius: 9px;
+  background: var(--panel, #fffdf8);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--ink, #25231f) 18%, transparent);
+  pointer-events: all;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.chen-hover-actions button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--ink, #25231f);
+  background: transparent;
+}
+.chen-hover-actions button:hover,
+.chen-hover-actions button:focus-visible { background: color-mix(in srgb, var(--accent, #6b5540) 12%, transparent); }
+
 .chen-connector-edge { stroke: var(--ink, #25231f); stroke-width: var(--stroke-width, 1.35px); fill: none; }
 .chen-connector-edge.is-selected { stroke-width: 2px; }
 .chen-cardinality-label {
@@ -128,12 +181,16 @@
   white-space: nowrap;
   pointer-events: none;
 }
+.chen-cardinality-label.is-editable { pointer-events: all; cursor: pointer; }
 
 .react-flow__node { cursor: grab; }
 .react-flow__node:active { cursor: grabbing; }
 .react-flow__node[data-id^='attribute:'] { cursor: default; }
 .chen-hidden-handle {
   z-index: 3;
+  /* Keep a measurable box for React Flow, then compensate its edge/center
+   * anchor difference below so every handle resolves to the same coordinate
+   * used by the pure renderer geometry. */
   width: 2px;
   height: 2px;
   min-width: 2px;
@@ -143,7 +200,67 @@
   pointer-events: none;
   background: transparent;
   right: auto !important;
+  transform: none !important;
+}
+.chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-top { transform: translate(-1px, 0) !important; }
+.chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-right { transform: translate(-2px, -1px) !important; }
+.chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-bottom { transform: translate(-1px, -2px) !important; }
+.chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-left { transform: translate(0, -1px) !important; }
+.chen-entity-node > .chen-hidden-handle {
+  /* Absolutely positioned children use the entity's padding edge as their
+   * origin. Move the anchor back over the outer border so its coordinates
+   * agree with the geometry used by the renderer. */
+  transform: translate(calc(-1 * var(--handle-inset) - 1px), calc(-1 * var(--handle-inset) - 1px)) !important;
+}
+.chen-entity-node > .chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-top {
+  transform: translate(calc(-1 * var(--handle-inset) - 1px), calc(-1 * var(--handle-inset))) !important;
+}
+.chen-entity-node > .chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-right {
+  transform: translate(calc(-1 * var(--handle-inset) - 2px), calc(-1 * var(--handle-inset) - 1px)) !important;
+}
+.chen-entity-node > .chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-bottom {
+  transform: translate(calc(-1 * var(--handle-inset) - 1px), calc(-1 * var(--handle-inset) - 2px)) !important;
+}
+.chen-entity-node > .chen-hidden-handle:not(.chen-terminal-handle):not(.chen-target-handle).react-flow__handle-left {
+  transform: translate(calc(-1 * var(--handle-inset)), calc(-1 * var(--handle-inset) - 1px)) !important;
+}
+.chen-target-handle { pointer-events: none; }
+.chen-target-handle.connectionindicator { pointer-events: all; }
+.chen-target-handle { touch-action: none; }
+.chen-hidden-handle.chen-target-handle { transform: none !important; }
+.chen-relationship-handle {
+  z-index: 13;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+  right: auto !important;
   transform: translate(-50%, -50%) !important;
+  cursor: crosshair;
+  touch-action: none;
+}
+.chen-relationship-handle > span {
+  display: block;
+  border: 1.5px solid var(--accent, #6b5540);
+  border-radius: 50%;
+  background: var(--canvas, #fbfaf6);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--ink, #25231f) 20%, transparent);
+}
+.chen-node.is-selected .chen-relationship-handle {
+  opacity: 1;
+  pointer-events: all;
+}
+@media (pointer: fine) {
+  .chen-node.is-hovered .chen-relationship-handle { opacity: 1; pointer-events: all; }
+}
+@media (max-width: 699px) {
+  .chen-node-toolbar { display: none; }
+}
+@media (pointer: coarse) {
+  .chen-node.is-selected .chen-relationship-handle { opacity: 1; pointer-events: all; }
 }
 .chen-terminal-handle {
   width: 12px;

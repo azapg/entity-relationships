@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   appendAttribute,
   cloneDiagram,
+  insertEntityAndRelationship,
   insertEntity,
   insertRelationship,
   moveItem,
@@ -24,11 +25,13 @@ import {
 import {
   ensureAttributeLayout,
   normalizeLayoutMode,
+  relationshipPositionBetween,
   snapMajorPositions,
 } from './layout'
 import { createBlankDiagram, createSampleDiagram } from './sample'
 import type {
   Attribute,
+  AttributeSide,
   Cardinality,
   CustomTheme,
   Diagram,
@@ -86,6 +89,17 @@ export type DiagramStore = {
     participants: Participant[],
     position?: Point,
   ) => string
+  createRelationshipFlow: (
+    sourceEntityId: string,
+    target: string | { name?: string; kind?: Entity['kind']; position?: Point },
+    name: string,
+    options?: {
+      position?: Point
+      sourceSide?: AttributeSide
+      cardinalities?: [Cardinality, Cardinality]
+      cardinalitiesPending?: boolean
+    },
+  ) => { entityId: string; relationshipId: string } | null
   renameRelationship: (id: string, name: string) => void
   updateParticipant: (
     relationshipId: string,
@@ -198,6 +212,11 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
   const positions = layoutMode === 'freeform'
     ? { ...diagram.view.positions }
     : snapMajorPositions(candidate)
+  const relationshipIds = new Set(diagram.relationships.map((relationship) => relationship.id))
+  const pendingCardinalities = diagram.view.pendingCardinalities
+    ? Object.fromEntries(Object.entries(diagram.view.pendingCardinalities)
+      .filter(([id, pending]) => relationshipIds.has(id) && pending === true)) as Record<string, true>
+    : undefined
   return {
     ...candidate,
     view: {
@@ -207,6 +226,9 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
       positions: Object.fromEntries(Object.entries(positions)
         .filter(([id]) => !attributeIds.has(id))),
       attributeLayout: ensureAttributeLayout(candidate),
+      ...(pendingCardinalities && Object.keys(pendingCardinalities).length
+        ? { pendingCardinalities }
+        : {}),
     },
   }
 }
@@ -266,6 +288,8 @@ const defaultRelationshipPosition = (diagram: Diagram): Point => ({
   x: 260 + diagram.relationships.length * 260,
   y: 260 + (diagram.relationships.length % 2) * 120,
 })
+
+const unspecifiedCardinality = (): Cardinality => ({ min: 0, max: 'n' })
 
 const selectionStillExists = (selection: SemanticSelection, diagram: Diagram) => {
   if (!selection) return true
@@ -382,6 +406,64 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       return id
     },
 
+    /**
+     * Shared relationship command used by the sheet, keyboard/toolbar entry
+     * points, and direct handle gestures. A new target entity and its
+     * relationship are committed together so the semantic model remains the
+     * source of truth and one undo removes the complete gesture operation.
+     */
+    createRelationshipFlow: (sourceEntityId, target, name, options = {}) => {
+      const current = get().diagram
+      const source = current.entities.find((entity) => entity.id === sourceEntityId)
+      if (!source) return null
+
+      const sourcePosition = current.view.positions[sourceEntityId]
+        ?? defaultEntityPosition(current.entities.findIndex((entity) => entity.id === sourceEntityId))
+      let targetEntityId: string
+      let targetPosition: Point
+      let next = current
+
+      if (typeof target === 'string') {
+        const targetEntity = current.entities.find((entity) => entity.id === target)
+        if (!targetEntity || targetEntity.id === sourceEntityId) return null
+        targetEntityId = targetEntity.id
+        targetPosition = current.view.positions[targetEntity.id]
+          ?? defaultEntityPosition(current.entities.findIndex((entity) => entity.id === targetEntity.id))
+      } else {
+        targetEntityId = makeId('entity')
+        targetPosition = target.position ?? defaultEntityPosition(current.entities.length)
+        const entity: Entity = {
+          id: targetEntityId,
+          name: target.name?.trim() || 'Sin nombre',
+          kind: target.kind ?? 'strong',
+          attributes: [],
+        }
+        next = insertEntity(current, entity, targetPosition)
+      }
+
+      const relationshipId = makeId('relationship')
+      const relationship: Relationship = {
+        id: relationshipId,
+        name: name.trim() || 'Sin nombre',
+        participants: [sourceEntityId, targetEntityId].map((entityId, index) => ({
+          entityId,
+          cardinality: { ...(options.cardinalities?.[index] ?? unspecifiedCardinality()) },
+        })),
+        attributes: [],
+      }
+      const relationshipPosition = options.position
+        ?? relationshipPositionBetween(sourcePosition, targetPosition, undefined, undefined, options.sourceSide)
+      const committed = typeof target === 'string'
+        ? insertRelationship(next, relationship, relationshipPosition, {
+          cardinalitiesPending: options.cardinalitiesPending,
+        })
+        : insertEntityAndRelationship(current, next.entities.at(-1)!, relationship, targetPosition, relationshipPosition, {
+          cardinalitiesPending: options.cardinalitiesPending,
+        })
+      if (!commit(committed)) return null
+      return { entityId: targetEntityId, relationshipId }
+    },
+
     renameRelationship: (id, name) => {
       commit(renameRelationshipCommand(get().diagram, id, name))
     },
@@ -395,7 +477,9 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
     },
 
     setPosition: (id, point) => {
-      commitWithoutHistory(moveItem(get().diagram, id, { x: point.x, y: point.y }))
+      // React Flow keeps pointer frames local; this is called once at drag
+      // stop, so the completed move is a single undoable semantic operation.
+      commit(moveItem(get().diagram, id, { x: point.x, y: point.y }))
     },
 
     setLayoutMode: (mode) => {

@@ -1,14 +1,17 @@
 import { Position } from '@xyflow/react'
 import { describe, expect, it } from 'vitest'
+import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, Diagram } from '../../domain/types'
 import { createSampleDiagram } from '../../domain/sample'
 import { cardinalityLabelPosition, orthogonalRoute } from './ConnectorEdge'
-import { STATIC_HANDLE_SIDES, positionForSide, staticHandleId } from './handles'
+import { connectionHandleBox, STATIC_HANDLE_SIDES, positionForSide, staticHandleId } from './handles'
 import {
   ATTRIBUTE_SIZE,
+  DIAMOND_INSET,
   ENTITY_SIZE,
   MAX_ENTITY_WIDTH,
   RELATION_SIZE,
+  allocateAttributeSides,
   attributeGeometry,
   distributedSlots,
   entityWidth,
@@ -120,6 +123,14 @@ const localTerminal = (geometry: ReturnType<typeof attributeGeometry>) => ({
 })
 
 describe('renderDiagram / Chen-stem', () => {
+  it('keeps relationship tips on the grid rhythm', () => {
+    expect(RELATION_SIZE.width % GRID_SIZE).toBe(0)
+    expect(RELATION_SIZE.height % GRID_SIZE).toBe(0)
+    expect((RELATION_SIZE.width / 2) % GRID_SIZE).toBe(0)
+    expect((RELATION_SIZE.height / 2) % GRID_SIZE).toBe(0)
+    expect(DIAMOND_INSET).toBe(0)
+  })
+
   it('projects the sample with deterministic semantic node and edge IDs', () => {
     const diagram = createSampleDiagram()
     const first = renderDiagram(diagram)
@@ -178,17 +189,17 @@ describe('renderDiagram / Chen-stem', () => {
       ...RELATION_SIZE, attributes: [],
     }
     const expected = {
-      north: { x: 264, y: 265 },
-      east: { x: 311, y: 264 },
-      south: { x: 312, y: 311 },
-      west: { x: 265, y: 312 },
+      north: { x: 264, y: 264 },
+      east: { x: 312, y: 264 },
+      south: { x: 312, y: 312 },
+      west: { x: 264, y: 312 },
     }
     Object.entries(expected).forEach(([side, point]) => {
       const attachment = ownerBoundaryPoint(owner, side as AttributeSide, side === 'north' || side === 'east' ? 24 : 72)
       expect(attachment).toEqual(point)
       const localX = attachment.x - owner.position.x
       const localY = attachment.y - owner.position.y
-      expect(Math.abs(localX - 48) + Math.abs(localY - 48)).toBe(47)
+    expect(Math.abs(localX - RELATION_SIZE.width / 2) + Math.abs(localY - RELATION_SIZE.height / 2)).toBe(RELATION_SIZE.width / 2)
     })
   })
 
@@ -218,7 +229,7 @@ describe('renderDiagram / Chen-stem', () => {
       expect(attachment).toEqual({ x: owner.position.x + handle.x, y: owner.position.y + handle.y })
       expect(terminal.x).toBe(attachment.x)
       expect(terminal.y).toBeLessThan(attachment.y)
-      expect(Math.abs(handle.x - 48) + Math.abs(handle.y - 48)).toBe(47)
+      expect(Math.abs(handle.x - RELATION_SIZE.width / 2) + Math.abs(handle.y - RELATION_SIZE.height / 2)).toBe(RELATION_SIZE.width / 2)
     })
   })
 
@@ -253,6 +264,38 @@ describe('renderDiagram / Chen-stem', () => {
     expect(positionForSide('west')).toBe(Position.Left)
   })
 
+  it('keeps oversized target handles anchored to the visible boundary', () => {
+    expect(connectionHandleBox('north', RELATION_SIZE.width, RELATION_SIZE.height, 44, 0)).toEqual({ left: 26, top: 0, width: 44, height: 44 })
+    expect(connectionHandleBox('east', RELATION_SIZE.width, RELATION_SIZE.height, 44, 0)).toEqual({ left: 52, top: 26, width: 44, height: 44 })
+    expect(connectionHandleBox('south', RELATION_SIZE.width, RELATION_SIZE.height, 44, 0)).toEqual({ left: 26, top: 52, width: 44, height: 44 })
+    expect(connectionHandleBox('west', RELATION_SIZE.width, RELATION_SIZE.height, 44, 0)).toEqual({ left: 0, top: 26, width: 44, height: 44 })
+  })
+
+  it('marks gesture-created cardinalities as incomplete in the projection', () => {
+    const diagram = baseDiagram({
+      entities: [entity('source'), entity('target')],
+      relationships: [{
+        id: 'connects', name: 'CONNECTS',
+        participants: [
+          { entityId: 'source', cardinality: { min: 0, max: 'n' } },
+          { entityId: 'target', cardinality: { min: 0, max: 'n' } },
+        ],
+        attributes: [],
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: {
+          source: { x: 0, y: 0 }, target: { x: 384, y: 0 }, connects: { x: 192, y: 0 },
+        },
+        pendingCardinalities: { connects: true },
+      },
+    })
+    const result = renderDiagram(diagram)
+    expect(result.nodes.find((node) => node.id === 'relationship:connects')?.data.cardinalityPending).toBe(true)
+    expect(result.edges.filter((edge) => edge.id.startsWith('participant-edge:'))
+      .every((edge) => edge.data?.cardinalityPending === true)).toBe(true)
+  })
+
   it('keeps the dense five-entity fixture aligned, attached, and non-draggable', () => {
     const diagram = denseFixture()
     const result = renderDiagram(diagram)
@@ -282,7 +325,7 @@ describe('renderDiagram / Chen-stem', () => {
         if (sideHandles) expect(new Set(sideHandles.map(({ offset }) => offset)).size).toBe(sideHandles.length)
       })
       if (owner.data.kind === 'relationship') {
-        handles.forEach(({ x, y }) => expect(Math.abs(x - 48) + Math.abs(y - 48)).toBe(47))
+        handles.forEach(({ x, y }) => expect(Math.abs(x - RELATION_SIZE.width / 2) + Math.abs(y - RELATION_SIZE.height / 2)).toBe(RELATION_SIZE.width / 2))
       }
     })
 
@@ -311,6 +354,51 @@ describe('renderDiagram / Chen-stem', () => {
     expect(afterThree.data.step).toBe(1)
     expect(beforeThree.data.step).toBe(2)
     expect(afterThree.position.y).toBeGreaterThan(beforeThree.position.y)
+  })
+
+  it('moves attributes away from a side newly occupied by a relationship', () => {
+    const person = {
+      ...entity('person'),
+      attributes: [{ id: 'person-id', name: 'id', key: true }],
+    }
+    const other = entity('other')
+    const relationship: Diagram['relationships'][number] = {
+      id: 'rel', name: 'RELATES',
+      participants: [
+        { entityId: 'person', cardinality: { min: 1, max: 1 } },
+        { entityId: 'other', cardinality: { min: 1, max: 1 } },
+      ],
+      attributes: [],
+    }
+    const beforeMove = baseDiagram({
+      entities: [person, other],
+      relationships: [relationship],
+      view: {
+        ...baseDiagram().view,
+        positions: { person: { x: 0, y: 0 }, other: { x: 600, y: 0 }, rel: { x: 240, y: 0 } },
+        attributeLayout: { 'person-id': { side: 'north' } },
+      },
+    })
+    const afterMove = {
+      ...beforeMove,
+      view: {
+        ...beforeMove.view,
+        positions: { ...beforeMove.view.positions, rel: { x: 0, y: -240 } },
+      },
+    }
+
+    expect(renderDiagram(beforeMove).nodes.find((node) => node.id.endsWith(':person-id'))?.data.side)
+      .toBe('north')
+    expect(renderDiagram(afterMove).nodes.find((node) => node.id.endsWith(':person-id'))?.data.side)
+      .not.toBe('north')
+    expect(renderDiagram(afterMove).edges.find((edge) => edge.id === 'participant-edge:rel:person:0')?.sourceHandle)
+      .toBe('source-north')
+  })
+
+  it('treats occupied sides as hard blockers while a free side exists', () => {
+    const attributes = [{ id: 'id', name: 'id', key: true }]
+    expect(allocateAttributeSides(attributes, { id: { side: 'east' } }, { east: 1 }).id)
+      .not.toBe('east')
   })
 
   it('routes every connector orthogonally and keeps cardinality near the source', () => {

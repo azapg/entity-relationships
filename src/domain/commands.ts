@@ -125,8 +125,12 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
 
   const positions = { ...diagram.view.positions }
   const attributeLayout = { ...diagram.view.attributeLayout }
+  const pendingCardinalities = { ...diagram.view.pendingCardinalities }
   delete positions[id]
-  removedRelationshipIds.forEach((relationshipId) => delete positions[relationshipId])
+  removedRelationshipIds.forEach((relationshipId) => {
+    delete positions[relationshipId]
+    delete pendingCardinalities[relationshipId]
+  })
   diagram.entities
     .find((entity) => entity.id === id)
     ?.attributes.forEach((attribute) => delete attributeLayout[attribute.id])
@@ -141,7 +145,14 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
     relationships: diagram.relationships.filter(
       (relationship) => !removedRelationshipIds.has(relationship.id),
     ),
-    view: { ...diagram.view, positions, attributeLayout },
+    view: {
+      ...diagram.view,
+      positions,
+      attributeLayout,
+      ...(Object.keys(pendingCardinalities).length
+        ? { pendingCardinalities }
+        : { pendingCardinalities: undefined }),
+    },
   }
 }
 
@@ -232,6 +243,7 @@ export const insertRelationship = (
   diagram: Diagram,
   relationship: Relationship,
   position: Point,
+  options: { cardinalitiesPending?: boolean } = {},
 ): Diagram => ({
   ...diagram,
   relationships: [...diagram.relationships, relationship],
@@ -242,8 +254,26 @@ export const insertRelationship = (
       [relationship.id]: diagram.view.layoutMode === 'structured' ? snapPoint(position) : position,
     },
     attributeLayout: { ...diagram.view.attributeLayout },
+    ...(options.cardinalitiesPending
+      ? { pendingCardinalities: { ...diagram.view.pendingCardinalities, [relationship.id]: true } }
+      : {}),
   },
 })
+
+/** Insert the two majors and their semantic relationship as one operation. */
+export const insertEntityAndRelationship = (
+  diagram: Diagram,
+  entity: Entity,
+  relationship: Relationship,
+  entityPosition: Point,
+  relationshipPosition: Point,
+  options: { cardinalitiesPending?: boolean } = {},
+): Diagram => insertRelationship(
+  insertEntity(diagram, entity, entityPosition),
+  relationship,
+  relationshipPosition,
+  options,
+)
 
 export const renameRelationship = (
   diagram: Diagram,
@@ -266,27 +296,46 @@ export const patchParticipant = (
   cardinality: Cardinality,
 ): Diagram => {
   const index = relationshipIndex(diagram, relationshipId)
-  return index < 0
-    ? diagram
-    : updateRelationshipAt(diagram, index, (relationship) => ({
+  if (index < 0) return diagram
+  const pendingCardinalities = { ...diagram.view.pendingCardinalities }
+  delete pendingCardinalities[relationshipId]
+  const next = updateRelationshipAt(diagram, index, (relationship) => ({
         ...relationship,
         participants: relationship.participants.map((participant) =>
           participant.entityId === entityId ? { ...participant, cardinality } : participant,
         ),
       }))
+  return {
+    ...next,
+    view: {
+      ...next.view,
+      ...(Object.keys(pendingCardinalities).length
+        ? { pendingCardinalities }
+        : { pendingCardinalities: undefined }),
+    },
+  }
 }
 
 export const removeRelationship = (diagram: Diagram, id: string): Diagram => {
   if (relationshipIndex(diagram, id) < 0) return diagram
   const positions = { ...diagram.view.positions }
   const attributeLayout = { ...diagram.view.attributeLayout }
+  const pendingCardinalities = { ...diagram.view.pendingCardinalities }
   delete positions[id]
+  delete pendingCardinalities[id]
   diagram.relationships.find((relationship) => relationship.id === id)?.attributes
     .forEach((attribute) => delete attributeLayout[attribute.id])
   return {
     ...diagram,
     relationships: diagram.relationships.filter((relationship) => relationship.id !== id),
-    view: { ...diagram.view, positions, attributeLayout },
+    view: {
+      ...diagram.view,
+      positions,
+      attributeLayout,
+      ...(Object.keys(pendingCardinalities).length
+        ? { pendingCardinalities }
+        : { pendingCardinalities: undefined }),
+    },
   }
 }
 
@@ -368,6 +417,9 @@ export const cloneDiagram = (diagram: Diagram): Diagram => ({
         { ...assignment },
       ]),
     ),
+    ...(diagram.view.pendingCardinalities
+      ? { pendingCardinalities: { ...diagram.view.pendingCardinalities } }
+      : {}),
     ...(diagram.view.customTheme
       ? { customTheme: { ...diagram.view.customTheme } }
       : {}),

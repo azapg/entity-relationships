@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- UI adapters intentionally accept renderer/store payloads. */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -9,21 +9,28 @@ import {
   useReactFlow,
   applyNodeChanges,
   BackgroundVariant,
+  ConnectionLineType,
+  type Connection,
+  type Edge,
   type Node,
   type NodeChange,
 } from '@xyflow/react'
 import {
-  Plus, MoreHorizontal, Undo2, Redo2, Maximize, Type, Link2, Pencil,
-  Trash2, Palette, X, Check, ChevronDown, KeyRound, SquareDashed,
+  Plus, Undo2, Redo2, Maximize, Type, Link2, Pencil,
+  Trash2, Palette, Check, ChevronDown, KeyRound, SquareDashed, Menu,
 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
+import { DialogScreen } from './components/DialogScreen'
+import { EditorTextInput } from './components/EditorTextInput'
 import { useDiagramStore } from './domain/store'
+import { describeCardinality, parseCardinalityLabel } from './domain/cardinality'
 import type { Cardinality, CustomTheme, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
 import { GRID_SIZE } from './domain/layout'
 import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
-import type { DiagramNodeData } from './renderers/types'
+import { relationshipHandleSide } from './renderers/chen-stem/handles'
+import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
 
 type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'appearance' | 'menu' | null
 
@@ -32,37 +39,105 @@ type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 
 // of their geometry. In particular, do not inject guessed width/height here:
 // React Flow's measured dimensions belong to the renderer and replacing them
 // with stale values is what causes the drag flicker this canvas used to have.
-function prepareRendered(rendered: ReturnType<typeof renderDiagram>) {
+type NodeTarget = Exclude<SemanticSelection, null>
+
+type RelationshipGesture = {
+  sourceEntityId: string
+  targetEntityId?: string
+  dropPosition?: Point
+  sourceSide?: 'north' | 'east' | 'south' | 'west'
+  touch?: boolean
+}
+
+function prepareRendered(
+  rendered: ReturnType<typeof renderDiagram>,
+  hoveredId?: string,
+  actionsFor?: (target: NodeTarget) => NodeActionHandlers,
+) {
   return {
     ...rendered,
     nodes: rendered.nodes.map((node) => {
       if (node.data.kind !== 'attribute') return node
-      return { ...node, draggable: false }
+      return {
+        ...node,
+        draggable: false,
+        data: { ...node.data, hovered: false },
+      }
+    }).map((node) => {
+      if (node.data.kind === 'attribute') return node
+      const target = { type: node.data.kind, id: node.data.semanticId } as NodeTarget
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          hovered: node.data.semanticId === hoveredId,
+          actions: actionsFor?.(target),
+        },
+      }
+    }),
+    edges: rendered.edges.map((edge) => {
+      const relationshipId = edge.data?.relationshipId
+      if (edge.data?.connectorKind !== 'participant' || typeof relationshipId !== 'string') return edge
+      const actions = actionsFor?.({ type: 'relationship', id: relationshipId })
+      return {
+        ...edge,
+        data: { ...edge.data, onCardinalityDoubleClick: actions?.editCardinality },
+      }
     }),
   }
 }
 
-function CanvasViewport({ diagram, selection, onSelect, onMove }: {
-  diagram: any; selection: SemanticSelection; onSelect: (s: SemanticSelection) => void; onMove: (id: string, p: { x: number; y: number }) => void
+function semanticIdFromNodeId(nodeId: string | null | undefined, kind: 'entity' | 'relationship' = 'entity') {
+  const prefix = `${kind}:`
+  return nodeId?.startsWith(prefix) ? nodeId.slice(prefix.length) : undefined
+}
+
+function clientPoint(event: MouseEvent | TouchEvent): Point | undefined {
+  if ('changedTouches' in event) {
+    const touch = event.changedTouches[0] ?? event.touches[0]
+    return touch ? { x: touch.clientX, y: touch.clientY } : undefined
+  }
+  return { x: event.clientX, y: event.clientY }
+}
+
+function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsFor, onRelationshipGesture }: {
+  diagram: any
+  selection: SemanticSelection
+  onSelect: (s: SemanticSelection) => void
+  onMove: (id: string, p: { x: number; y: number }) => void
+  onEdit: (target: NodeTarget) => void
+  actionsFor: (target: NodeTarget) => NodeActionHandlers
+  onRelationshipGesture: (gesture: RelationshipGesture) => void
 }) {
   const rf = useReactFlow()
   const layoutMode = diagram.view?.layoutMode ?? 'structured'
+  const [hoveredId, setHoveredId] = useState<string>()
+  const hoverClearTimer = useRef<number | undefined>(undefined)
+  const connectionStart = useRef<RelationshipGesture | undefined>(undefined)
+  const connectionCommitted = useRef(false)
   // React Flow is controlled locally during a drag. Re-projecting the whole
   // semantic diagram for every pointer event replaces every node and edge,
   // which makes React Flow lose its drag state and visibly flicker. The
   // semantic model is still updated once, on drag stop, below.
-  const initialRendered = useMemo(() => prepareRendered(renderDiagram(diagram, selection?.id)), [diagram, selection])
+  const initialRendered = useMemo(
+    () => prepareRendered(renderDiagram(diagram, selection?.id), hoveredId, actionsFor),
+    [actionsFor, diagram, hoveredId, selection],
+  )
   const [nodes, setNodes] = useState<Node<DiagramNodeData>[]>(initialRendered.nodes)
   const [edges, setEdges] = useState(initialRendered.edges)
+
+  useEffect(() => () => {
+    if (hoverClearTimer.current !== undefined) window.clearTimeout(hoverClearTimer.current)
+  }, [])
 
   // Any canonical model change (including reset, undo, redo, or an update
   // from elsewhere) replaces the local projection. This effect does not
   // depend on local nodes, so it cannot form a render loop while dragging.
   useEffect(() => {
-    const next = prepareRendered(renderDiagram(diagram, selection?.id))
+    const next = prepareRendered(renderDiagram(diagram, selection?.id), hoveredId, actionsFor)
     setNodes(next.nodes)
     setEdges(next.edges)
-  }, [diagram, selection])
+  }, [actionsFor, diagram, hoveredId, selection])
 
   const onNodesChange = useCallback((changes: NodeChange<Node<DiagramNodeData>>[]) => {
     setNodes((current) => {
@@ -110,6 +185,94 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
     else if (data.ownerId) onSelect({ type: data.ownerKind ?? 'entity', id: data.ownerId })
   }, [onSelect])
 
+  const onNodeMouseEnter = useCallback((_: React.MouseEvent, node: Node) => {
+    if (!window.matchMedia?.('(pointer: fine)')?.matches) return
+    if (hoverClearTimer.current !== undefined) {
+      window.clearTimeout(hoverClearTimer.current)
+      hoverClearTimer.current = undefined
+    }
+    const data: any = node.data
+    if (data.kind === 'entity' || data.kind === 'relationship') setHoveredId(data.semanticId ?? node.id)
+  }, [])
+
+  const onNodeMouseLeave = useCallback((_: React.MouseEvent, node: Node) => {
+    if (!window.matchMedia?.('(pointer: fine)')?.matches) return
+    const data: any = node.data
+    if (data.kind !== 'entity' && data.kind !== 'relationship') return
+    const id = data.semanticId ?? node.id
+    if (hoverClearTimer.current !== undefined) window.clearTimeout(hoverClearTimer.current)
+    hoverClearTimer.current = window.setTimeout(() => {
+      setHoveredId((current) => current === id ? undefined : current)
+      hoverClearTimer.current = undefined
+    }, 500)
+  }, [])
+
+  const onNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
+    const data: any = node.data
+    if (data.kind !== 'entity' && data.kind !== 'relationship') return
+    onEdit({ type: data.kind, id: data.semanticId ?? node.id })
+  }, [onEdit])
+
+  const onConnectStart = useCallback((_: MouseEvent | TouchEvent, params: { nodeId: string | null; handleId: string | null }) => {
+    const sourceEntityId = semanticIdFromNodeId(params.nodeId)
+    const sourceSide = relationshipHandleSide(params.handleId)
+    if (!sourceEntityId || !sourceSide) return
+    connectionStart.current = { sourceEntityId, sourceSide }
+    connectionCommitted.current = false
+  }, [])
+
+  const onConnect = useCallback((connection: Connection) => {
+    const sourceEntityId = semanticIdFromNodeId(connection.source)
+    const targetEntityId = semanticIdFromNodeId(connection.target)
+    const sourceSide = relationshipHandleSide(connection.sourceHandle)
+    if (!sourceEntityId || !targetEntityId || !sourceSide) return
+    connectionCommitted.current = true
+    onRelationshipGesture({ sourceEntityId, targetEntityId, sourceSide })
+    connectionStart.current = undefined
+  }, [onRelationshipGesture])
+
+  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent, connectionState: any) => {
+    const started = connectionStart.current
+    const sourceEntityId = semanticIdFromNodeId(connectionState.fromNode?.id) ?? started?.sourceEntityId
+    const sourceSide = relationshipHandleSide(connectionState.fromHandle?.id) ?? started?.sourceSide
+    if (!sourceEntityId || !sourceSide || connectionCommitted.current) {
+      connectionStart.current = undefined
+      connectionCommitted.current = false
+      return
+    }
+    // A rejected drop over another node is not an empty-canvas gesture. Only
+    // a connection with no target node creates the related entity.
+    if (connectionState.toNode) {
+      connectionStart.current = undefined
+      return
+    }
+    const point = clientPoint(event)
+    if (point) {
+      const dropPosition = rf.screenToFlowPosition(point, {
+        snapToGrid: layoutMode === 'structured',
+        snapGrid: [GRID_SIZE, GRID_SIZE],
+      })
+      onRelationshipGesture({
+        sourceEntityId,
+        sourceSide,
+        touch: 'changedTouches' in event,
+        // Keep the new entity centered under the pointer; its top-left
+        // remains the canonical position stored by the domain command.
+        dropPosition: { x: dropPosition.x - GRID_SIZE * 4, y: dropPosition.y - GRID_SIZE * 2 },
+      })
+    }
+    connectionStart.current = undefined
+  }, [layoutMode, onRelationshipGesture, rf])
+
+  const isValidConnection = useCallback((connection: Connection | Edge) => (
+    Boolean(
+      semanticIdFromNodeId(connection.source) &&
+      semanticIdFromNodeId(connection.target) &&
+      relationshipHandleSide(connection.sourceHandle) &&
+      connection.source !== connection.target
+    )
+  ), [])
+
   return <div className={`canvas-wrap layout-${layoutMode}`}>
     <ReactFlow
       nodes={nodes}
@@ -117,6 +280,9 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodeClick={selectNode}
+      onNodeDoubleClick={onNodeDoubleClick}
+      onNodeMouseEnter={onNodeMouseEnter}
+      onNodeMouseLeave={onNodeMouseLeave}
       onPaneClick={() => onSelect(null)}
       onNodeDragStop={(_, node) => {
         const d: any = node.data
@@ -124,11 +290,17 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
           const id = d.semanticId ?? node.id
           const position = { x: node.position.x, y: node.position.y }
           // One canonical write per completed drag; all pointer-frame updates
-          // above stay local and therefore do not pollute persistence/history.
+          // above stay local, so the completed move is one history entry.
           onMove(id, position)
         }
       }}
       onNodesChange={onNodesChange}
+      onConnectStart={onConnectStart}
+      onConnect={onConnect}
+      onConnectEnd={onConnectEnd}
+      isValidConnection={isValidConnection}
+      connectionLineType={ConnectionLineType.Step}
+      connectOnClick
       snapToGrid={layoutMode === 'structured'}
       snapGrid={[GRID_SIZE, GRID_SIZE]}
       fitView
@@ -139,7 +311,8 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
       zoomOnScroll
       zoomOnDoubleClick={false}
       nodesDraggable
-      nodesConnectable={false}
+      nodesConnectable
+      deleteKeyCode={[]}
       edgesFocusable={false}
       proOptions={{ hideAttribution: true }}
       selectionOnDrag={false}
@@ -155,7 +328,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
       <Controls showInteractive={false} className="rf-controls" />
       <MiniMap pannable zoomable nodeColor="var(--minimap-node)" className="rf-minimap" />
     </ReactFlow>
-    <button className="fit-button" onClick={() => rf.fitView({ padding: 0.12, minZoom: 0.25, duration: 420 })} aria-label="Ajustar vista"><Maximize size={16} /> <span>Ajustar</span></button>
+    <button className="fit-button" onClick={() => rf.fitView({ padding: 0.12, minZoom: 0.25, duration: 420 })} aria-label="Ajustar vista" title="Ajustar vista (F)"><Maximize size={16} /> <span>Ajustar</span></button>
   </div>
 }
 
@@ -165,78 +338,218 @@ function EditorApp() {
   const canUndo = useDiagramStore((s: any) => s.canUndo)
   const canRedo = useDiagramStore((s: any) => s.canRedo)
   const store = useDiagramStore()
+  const rf = useReactFlow()
   const [sheet, setSheet] = useState<SheetName>(null)
   const [toast, setToast] = useState('')
+  const [draftEntityId, setDraftEntityId] = useState<string>()
+  const [draftRelationshipId, setDraftRelationshipId] = useState<string>()
+  const [pendingRelationshipRename, setPendingRelationshipRename] = useState<string>()
 
   const selectedEntity = selection?.type === 'entity' ? diagram.entities.find((e: any) => e.id === selection.id) : undefined
   const selectedRelationship = selection?.type === 'relationship' ? diagram.relationships.find((r: any) => r.id === selection.id) : undefined
 
+  const setSelection = useCallback((next: SemanticSelection) => {
+    store.setSelection(next)
+    setSheet(null)
+  }, [store])
+
+  const deleteTarget = useCallback((target: SemanticSelection) => {
+    if (!target) return
+    if (target.type === 'entity') store.deleteEntity(target.id)
+    else store.deleteRelationship(target.id)
+    if (selection?.id === target.id && selection.type === target.type) store.setSelection(null)
+    setSheet(null)
+  }, [selection, store])
+
+  const closeSheet = useCallback(() => {
+    // A keyboard/FAB-created blank entity is a draft until its name is
+    // confirmed. Cancelling that flow should not leave a placeholder behind.
+    if (draftEntityId) store.deleteEntity(draftEntityId)
+    setDraftEntityId(undefined)
+    setPendingRelationshipRename(undefined)
+    setDraftRelationshipId(undefined)
+    setSheet(null)
+  }, [draftEntityId, store])
+
+  const finishEntityEdit = useCallback(() => {
+    const relationshipId = pendingRelationshipRename
+    setDraftEntityId(undefined)
+    setPendingRelationshipRename(undefined)
+    if (relationshipId) {
+      store.setSelection({ type: 'relationship', id: relationshipId })
+      setDraftRelationshipId(relationshipId)
+      setSheet('relationshipEdit')
+    } else {
+      setSheet(null)
+    }
+  }, [pendingRelationshipRename, store])
+
+  const finishRelationshipEdit = useCallback(() => {
+    setDraftRelationshipId(undefined)
+    setSheet(null)
+  }, [])
+
+  const viewportEntityPosition = useCallback((): Point => {
+    const canvas = document.querySelector('.canvas-wrap')?.getBoundingClientRect()
+    const center = {
+      x: (canvas?.left ?? 0) + (canvas?.width ?? window.innerWidth) / 2,
+      y: (canvas?.top ?? 64) + (canvas?.height ?? window.innerHeight - 64) / 2,
+    }
+    const flowCenter = rf.screenToFlowPosition(center)
+    return { x: flowCenter.x - 96, y: flowCenter.y - 48 }
+  }, [rf])
+
+  const startEntityCreation = useCallback(() => {
+    const id = store.createEntity('Sin nombre', 'strong', viewportEntityPosition())
+    store.setSelection({ type: 'entity', id })
+    setDraftEntityId(id)
+    setSheet('entity')
+  }, [store, viewportEntityPosition])
+
+  const openNodeAction = useCallback((target: NodeTarget, nextSheet: SheetName) => {
+    store.setSelection(target)
+    setSheet(nextSheet)
+  }, [store])
+
+  const openNodeEdit = useCallback((target: NodeTarget) => {
+    openNodeAction(target, target.type === 'entity' ? 'entity' : 'relationshipEdit')
+  }, [openNodeAction])
+
+  const actionsFor = useCallback((target: NodeTarget): NodeActionHandlers => ({
+    addAttribute: () => openNodeAction(target, 'attribute'),
+    createRelationship: target.type === 'entity' ? () => openNodeAction(target, 'relationship') : undefined,
+    rename: () => openNodeAction(target, target.type === 'entity' ? 'entity' : 'relationshipEdit'),
+    editCardinality: target.type === 'relationship' ? () => openNodeAction(target, 'cardinality') : undefined,
+    delete: () => deleteTarget(target),
+  }), [deleteTarget, openNodeAction])
+
+  const handleRelationshipGesture = useCallback((gesture: RelationshipGesture) => {
+    const target = gesture.targetEntityId ?? {
+      position: gesture.dropPosition ?? viewportEntityPosition(),
+      kind: 'strong' as const,
+    }
+    const result = store.createRelationshipFlow(
+      gesture.sourceEntityId,
+      target,
+      'Sin nombre',
+      { sourceSide: gesture.sourceSide, cardinalitiesPending: true },
+    )
+    if (!result) return
+
+    if (gesture.targetEntityId) {
+      store.setSelection({ type: 'relationship', id: result.relationshipId })
+      setDraftRelationshipId(result.relationshipId)
+      setSheet('relationshipEdit')
+      return
+    }
+
+    store.setSelection({ type: 'entity', id: result.entityId })
+    if (gesture.touch || window.matchMedia?.('(pointer: coarse)')?.matches) {
+      // Touch drops stay deliberately non-modal: the new entity is selected
+      // with placeholders in place, and the existing action bar remains the
+      // quickest way to rename/configure either object.
+      setSheet(null)
+      return
+    }
+    setDraftEntityId(result.entityId)
+    setPendingRelationshipRename(result.relationshipId)
+    setSheet('entity')
+  }, [store, viewportEntityPosition])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement
-      if (target?.matches('input, textarea, select') || target?.isContentEditable) return
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) store.redo(); else store.undo() }
-      else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); store.redo() }
-      else if (event.key === 'Escape') { setSheet(null); store.setSelection(null) }
-      else if ((event.key === 'Delete' || event.key === 'Backspace') && selection) { event.preventDefault(); if (selection.type === 'entity') store.deleteEntity(selection.id); else store.deleteRelationship(selection.id); store.setSelection(null) }
+      const target = event.target instanceof HTMLElement ? event.target : undefined
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (sheet) closeSheet()
+        else store.setSelection(null)
+        return
+      }
+      if (
+        target?.matches('input, textarea, select, [contenteditable="true"]') ||
+        target?.isContentEditable ||
+        target?.closest('[role="dialog"]')
+      ) return
+
+      const key = event.key.toLowerCase()
+      if ((event.metaKey || event.ctrlKey) && key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) store.redo()
+        else store.undo()
+      } else if ((event.metaKey || event.ctrlKey) && key === 'y') {
+        event.preventDefault()
+        store.redo()
+      } else if (key === 'e') {
+        event.preventDefault()
+        startEntityCreation()
+      } else if (key === 'a' && selection) {
+        event.preventDefault()
+        setSheet('attribute')
+      } else if (key === 'r' && selection?.type === 'entity') {
+        event.preventDefault()
+        setSheet('relationship')
+      } else if (key === 'enter' && selection) {
+        event.preventDefault()
+        setSheet(selection.type === 'entity' ? 'entity' : 'relationshipEdit')
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selection) {
+        event.preventDefault()
+        deleteTarget(selection)
+      } else if (key === 'f') {
+        event.preventDefault()
+        rf.fitView({ padding: 0.12, minZoom: 0.25, duration: 420 })
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selection, store])
+  }, [closeSheet, deleteTarget, rf, selection, sheet, startEntityCreation, store])
 
   useEffect(() => { if (toast) { const t = window.setTimeout(() => setToast(''), 2400); return () => window.clearTimeout(t) } }, [toast])
 
-  const setSelection = (next: SemanticSelection) => { store.setSelection(next); setSheet(null) }
-  const deleteSelected = () => { if (selection?.type === 'entity') store.deleteEntity(selection.id); if (selection?.type === 'relationship') store.deleteRelationship(selection.id); store.setSelection(null); setSheet(null) }
+  const deleteSelected = () => deleteTarget(selection)
 
   if (!diagram) return <main className="loading">Cargando el lienzo…</main>
 
   return <main className={`app-shell theme-${diagram.view.theme}`} style={customStyle(diagram.view.customTheme)}>
     <header className="topbar">
-      <div className="brand-mark" aria-hidden="true">∿</div>
+      <button className="overlay-button top-menu-button" onClick={() => setSheet('menu')} aria-label="Abrir menú" title="Opciones del diagrama"><Menu size={20} /></button>
       <button className="diagram-title" onClick={() => setSheet('menu')} title="Opciones del diagrama">{diagram.name || 'Diagrama sin título'} <ChevronDown size={14} /></button>
       <div className="top-actions">
-        <button className="icon-button" disabled={!canUndo} onClick={store.undo} aria-label="Deshacer"><Undo2 size={18} /></button>
-        <button className="icon-button" disabled={!canRedo} onClick={store.redo} aria-label="Rehacer"><Redo2 size={18} /></button>
+        <button className="icon-button" disabled={!canUndo} onClick={store.undo} aria-label="Deshacer" title="Deshacer (⌘/Ctrl+Z)"><Undo2 size={18} /></button>
+        <button className="icon-button" disabled={!canRedo} onClick={store.redo} aria-label="Rehacer" title="Rehacer (⌘/Ctrl+Shift+Z)"><Redo2 size={18} /></button>
         <button className="icon-button" onClick={() => setSheet('appearance')} aria-label="Apariencia"><Palette size={18} /></button>
-        <button className="icon-button" onClick={() => setSheet('menu')} aria-label="Más opciones"><MoreHorizontal size={20} /></button>
       </div>
     </header>
-    <CanvasViewport diagram={diagram} selection={selection} onSelect={setSelection} onMove={store.setPosition} />
-    {!selection && <button className="fab" onClick={() => setSheet('entity')} aria-label="Crear entidad"><Plus size={27} /><span>Nueva entidad</span></button>}
+    <CanvasViewport diagram={diagram} selection={selection} onSelect={setSelection} onMove={store.setPosition} onEdit={openNodeEdit} actionsFor={actionsFor} onRelationshipGesture={handleRelationshipGesture} />
+    {!selection && <button className="fab" onClick={startEntityCreation} aria-label="Crear entidad" title="Crear entidad (E)"><Plus size={27} /><span>Nueva entidad</span></button>}
     {selection && <ContextBar selection={selection} onAction={setSheet} onDelete={deleteSelected} />}
     {toast && <div className="toast">{toast}</div>}
-    {sheet && <Sheet title={sheetTitle(sheet, selectedEntity, selectedRelationship)} onClose={() => setSheet(null)}>
-      {sheet === 'entity' && <EntityForm entity={selectedEntity} onDone={() => setSheet(null)} store={store} />}
+    {sheet && <DialogScreen title={sheetTitle(sheet, selectedEntity, selectedRelationship)} onClose={closeSheet}>
+      {sheet === 'entity' && <EntityForm entity={selectedEntity} draft={draftEntityId === selectedEntity?.id} onDone={finishEntityEdit} store={store} />}
       {sheet === 'attribute' && <AttributeEditor ownerType={selectedEntity ? 'entity' : 'relationship'} owner={selectedEntity ?? selectedRelationship} onDone={() => setSheet(null)} store={store} />}
       {sheet === 'relationship' && <RelationshipFlow selectedEntity={selectedEntity} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
-      {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} store={store} onDone={() => setSheet(null)} />}
+      {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} draft={draftRelationshipId === selectedRelationship.id} store={store} onDone={finishRelationshipEdit} />}
       {sheet === 'cardinality' && selectedRelationship && <CardinalityEditor relationship={selectedRelationship} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'appearance' && <AppearanceEditor view={diagram.view} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'menu' && <DiagramMenu diagram={diagram} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
-    </Sheet>}
+    </DialogScreen>}
   </main>
 }
 
 function ContextBar({ selection, onAction, onDelete }: { selection: NonNullable<SemanticSelection>; onAction: (s: SheetName) => void; onDelete: () => void }) {
   const entity = selection.type === 'entity'
   return <nav className="context-bar" aria-label="Acciones del elemento seleccionado">
-    <button onClick={() => onAction('attribute')}><Type size={17} /><span>Atributo</span></button>
-    {entity ? <button onClick={() => onAction('relationship')}><Link2 size={17} /><span>Relacionar</span></button> : <button onClick={() => onAction('cardinality')}><Link2 size={17} /><span>Cardinalidad</span></button>}
-    <button onClick={() => onAction(entity ? 'entity' : 'relationshipEdit')}><Pencil size={17} /><span>Editar</span></button>
-    <button className="danger-ghost" onClick={onDelete}><Trash2 size={17} /><span>Eliminar</span></button>
+    <button onClick={() => onAction('attribute')} title="Añadir atributo (A)"><Type size={17} /><span>Atributo</span></button>
+    {entity ? <button onClick={() => onAction('relationship')} title="Crear relación (R)"><Link2 size={17} /><span>Relacionar</span></button> : <button onClick={() => onAction('cardinality')} title="Editar cardinalidad"><Link2 size={17} /><span>Cardinalidad</span></button>}
+    <button onClick={() => onAction(entity ? 'entity' : 'relationshipEdit')} title="Renombrar (Enter)"><Pencil size={17} /><span>Editar</span></button>
+    <button className="danger-ghost" onClick={onDelete} title="Eliminar (Delete/Backspace)"><Trash2 size={17} /><span>Eliminar</span></button>
   </nav>
 }
 
-function Sheet({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="sheet-backdrop" onMouseDown={(e) => { if (e.currentTarget === e.target) onClose() }}><section className="sheet" role="dialog" aria-modal="true" aria-label={title}><div className="sheet-handle" /><header className="sheet-header"><h2>{title}</h2><button className="close-button" onClick={onClose} aria-label="Cerrar"><X size={19} /></button></header>{children}</section></div>
-}
-
-function EntityForm({ entity, onDone, store }: any) {
-  const [name, setName] = useState(entity?.name ?? '')
+function EntityForm({ entity, draft, onDone, store }: any) {
+  const [name, setName] = useState(draft ? '' : entity?.name ?? '')
   const [kind, setKind] = useState<'strong' | 'weak'>(entity?.kind ?? 'strong')
-  const submit = (e: React.FormEvent) => { e.preventDefault(); const clean = name.trim(); if (!clean) return; if (entity) { store.renameEntity(entity.id, clean); store.setEntityKind(entity.id, kind) } else { const id = store.createEntity(clean, kind); store.setSelection({ type: 'entity', id }) } onDone() }
-  return <form className="form-stack" onSubmit={submit}><label>Nombre<input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. ESTUDIANTE" /></label><div className="choice-label">Tipo de entidad</div><div className="segmented"><button type="button" className={kind === 'strong' ? 'active' : ''} onClick={() => setKind('strong')}><span className="mini-entity" />Fuerte</button><button type="button" className={kind === 'weak' ? 'active' : ''} onClick={() => setKind('weak')}><SquareDashed size={18} />Débil</button></div><button className="primary-button" disabled={!name.trim()}><Check size={17} />{entity ? 'Guardar cambios' : 'Crear entidad'}</button></form>
+  const submit = (e: React.FormEvent) => { e.preventDefault(); const clean = name.trim(); if (!clean) return; if (entity) { store.renameEntity(entity.id, clean); if (entity.kind !== kind) store.setEntityKind(entity.id, kind) } else { const id = store.createEntity(clean, kind); store.setSelection({ type: 'entity', id }) } onDone() }
+  return <form className="form-stack dialog-form" onSubmit={submit}><label>Nombre<EditorTextInput autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. ESTUDIANTE" /></label><div className="choice-label">Tipo de entidad</div><div className="segmented"><button type="button" className={kind === 'strong' ? 'active' : ''} onClick={() => setKind('strong')}><span className="mini-entity" />Fuerte</button><button type="button" className={kind === 'weak' ? 'active' : ''} onClick={() => setKind('weak')}><SquareDashed size={18} />Débil</button></div><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />{entity ? 'Guardar cambios' : 'Crear entidad'}</button></form>
 }
 
 function AttributeEditor({ ownerType, owner, onDone, store }: any) {
@@ -244,8 +557,19 @@ function AttributeEditor({ ownerType, owner, onDone, store }: any) {
   const [name, setName] = useState('')
   const [key, setKey] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const save = (e: React.FormEvent) => { e.preventDefault(); if (!name.trim()) return; if (editing) store.updateAttribute(ownerType, owner.id, editing.id, { name: name.trim(), key }); else store.addAttribute(ownerType, owner.id, name.trim(), key); setName(''); setKey(false); setEditing(null) }
-  return <div className="form-stack"><div className="attribute-list">{attrs.length === 0 && <p className="empty-note">Todavía no hay atributos.</p>}{attrs.map((a: any) => <div className="attribute-row" key={a.id}><span className={a.key ? 'key-dot filled' : 'key-dot'} /> <span>{a.name}</span>{a.key && <KeyRound size={13} /> }<button onClick={() => { setEditing(a); setName(a.name); setKey(a.key) }} aria-label={`Editar ${a.name}`}><Pencil size={14} /></button><button onClick={() => store.deleteAttribute(ownerType, owner.id, a.id)} aria-label={`Eliminar ${a.name}`}><Trash2 size={14} /></button></div>)}</div><form onSubmit={save} className="attribute-add"><label>{editing ? 'Editar atributo' : 'Nuevo atributo'}<input autoFocus={!editing} value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. nombre" /></label><label className="check-label"><input type="checkbox" checked={key} onChange={e => setKey(e.target.checked)} /> <span className="key-dot filled" /> Es atributo clave</label><div className="form-actions"><button type="button" className="secondary-button" onClick={() => { if (editing) { setEditing(null); setName(''); setKey(false) } else onDone() }}>{editing ? 'Cancelar' : 'Cerrar'}</button><button className="primary-button" disabled={!name.trim()}>{editing ? 'Guardar' : 'Añadir'}</button></div></form></div>
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    if (editing) store.updateAttribute(ownerType, owner.id, editing.id, { name: name.trim(), key })
+    else store.addAttribute(ownerType, owner.id, name.trim(), key)
+    setName('')
+    setKey(false)
+    setEditing(null)
+    nameInputRef.current?.focus({ preventScroll: true })
+    window.requestAnimationFrame(() => nameInputRef.current?.focus({ preventScroll: true }))
+  }
+  return <div className="form-stack dialog-form"><div className="attribute-list">{attrs.length === 0 && <p className="empty-note">Todavía no hay atributos.</p>}{attrs.map((a: any) => <div className="attribute-row" key={a.id}><span className={a.key ? 'key-dot filled' : 'key-dot'} /> <span>{a.name}</span>{a.key && <KeyRound size={13} /> }<button onClick={() => { setEditing(a); setName(a.name); setKey(a.key) }} aria-label={`Editar ${a.name}`}><Pencil size={14} /></button><button onClick={() => store.deleteAttribute(ownerType, owner.id, a.id)} aria-label={`Eliminar ${a.name}`}><Trash2 size={14} /></button></div>)}</div><form onSubmit={save} className="attribute-add dialog-attribute-form"><label>{editing ? 'Editar atributo' : 'Nuevo atributo'}<EditorTextInput ref={nameInputRef} autoFocus={!editing} value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. nombre" /></label><label className="check-label"><input type="checkbox" checked={key} onChange={e => setKey(e.target.checked)} /> <span className="key-dot filled" /> Es atributo clave</label><div className="form-actions"><button type="button" className="secondary-button" onClick={() => { if (editing) { setEditing(null); setName(''); setKey(false) } else onDone() }}>{editing ? 'Cancelar' : 'Cerrar'}</button><button className="primary-button" disabled={!name.trim()}>{editing ? 'Guardar' : 'Añadir'}</button></div></form></div>
 }
 
 function RelationshipFlow({ selectedEntity, entities, store, onDone }: any) {
@@ -255,37 +579,63 @@ function RelationshipFlow({ selectedEntity, entities, store, onDone }: any) {
   const [from, setFrom] = useState<Cardinality>({ min: 0, max: 'n' })
   const [to, setTo] = useState<Cardinality>({ min: 0, max: 'n' })
   const otherEntities = entities.filter((entity: any) => entity.id !== selectedEntity?.id)
-  const submit = (e: React.FormEvent) => { e.preventDefault(); if (!selectedEntity || !name.trim()) return; let targetId = target; if (target === 'new') { if (!targetName.trim()) return; targetId = store.createEntity(targetName.trim()) } const id = store.createRelationship(name.trim(), [{ entityId: selectedEntity.id, cardinality: from }, { entityId: targetId, cardinality: to }]); store.setSelection({ type: 'relationship', id }); onDone() }
-  return <form className="form-stack" onSubmit={submit}><p className="flow-intro">Relacionar <strong>{selectedEntity?.name}</strong> con…</p><div className="target-options"><label className="radio-card"><input type="radio" checked={target === 'new'} onChange={() => setTarget('new')} /> <span>Crear nueva entidad</span></label><label className={`radio-card${otherEntities.length ? '' : ' is-disabled'}`}><input type="radio" disabled={!otherEntities.length} checked={target !== 'new'} onChange={e => { if (e.target.checked) setTarget(otherEntities[0]?.id ?? 'new') }} /> <span>Entidad existente</span></label></div>{target === 'new' ? <label>Nombre de la entidad<input autoFocus value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="p. ej. CURSO" /></label> : <label>Entidad destino<select value={target} onChange={e => setTarget(e.target.value)}>{otherEntities.map((entity: any) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}</select></label>}<label>Nombre de la relación<input value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. INSCRIBE" /></label><div className="cardinality-grid"><CardinalitySelect label={selectedEntity?.name ?? 'Origen'} value={from} onChange={setFrom} /><CardinalitySelect label={target === 'new' ? (targetName || 'Nueva entidad') : otherEntities.find((entity: any) => entity.id === target)?.name} value={to} onChange={setTo} /></div><button className="primary-button" disabled={!name.trim() || (target === 'new' && !targetName.trim())}><Link2 size={17} />Crear relación</button></form>
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedEntity || !name.trim()) return
+    const result = store.createRelationshipFlow(
+      selectedEntity.id,
+      target === 'new' ? { name: targetName.trim() || undefined } : target,
+      name.trim(),
+      { cardinalities: [from, to] },
+    )
+    if (!result) return
+    store.setSelection({ type: 'relationship', id: result.relationshipId })
+    onDone()
+  }
+  return <form className="form-stack dialog-form" onSubmit={submit}><p className="flow-intro">Relacionar <strong>{selectedEntity?.name}</strong> con…</p><div className="target-options"><label className="radio-card"><input type="radio" checked={target === 'new'} onChange={() => setTarget('new')} /> <span>Crear nueva entidad</span></label><label className={`radio-card${otherEntities.length ? '' : ' is-disabled'}`}><input type="radio" disabled={!otherEntities.length} checked={target !== 'new'} onChange={e => { if (e.target.checked) setTarget(otherEntities[0]?.id ?? 'new') }} /> <span>Entidad existente</span></label></div>{target === 'new' ? <label>Nombre de la entidad<EditorTextInput autoFocus value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="p. ej. CURSO" /></label> : <label>Entidad destino<select value={target} onChange={e => setTarget(e.target.value)}>{otherEntities.map((entity: any) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}</select></label>}<label>Nombre de la relación<EditorTextInput value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. INSCRIBE" /></label><div className="cardinality-grid"><CardinalitySelect label={selectedEntity?.name ?? 'Origen'} value={from} onChange={setFrom} /><CardinalitySelect label={target === 'new' ? (targetName || 'Nueva entidad') : otherEntities.find((entity: any) => entity.id === target)?.name} value={to} onChange={setTo} /></div><div className="cardinality-explanations"><CardinalityExplanation entityName={selectedEntity?.name ?? 'Origen'} relationshipName={name || 'esta relación'} value={from} /><CardinalityExplanation entityName={target === 'new' ? (targetName || 'Nueva entidad') : otherEntities.find((entity: any) => entity.id === target)?.name ?? 'Entidad destino'} relationshipName={name || 'esta relación'} value={to} /></div><button className="primary-button dialog-submit" disabled={!name.trim() || (target === 'new' && !targetName.trim())}><Link2 size={17} />Crear relación</button></form>
 }
 
 function CardinalitySelect({ label, value, onChange }: { label?: string; value: Cardinality; onChange: (c: Cardinality) => void }) {
-  return <label>{label}<select value={cardinalityLabel(value)} onChange={e => { const [min, max] = e.target.value.slice(1, -1).split(','); onChange({ min: Number(min) as 0 | 1, max: max as 1 | 'n' }) }}><option value="(0,1)">(0,1)</option><option value="(1,1)">(1,1)</option><option value="(0,n)">(0,n)</option><option value="(1,n)">(1,n)</option></select></label>
+  return <label>{label}<select value={cardinalityLabel(value)} onChange={e => onChange(parseCardinalityLabel(e.target.value))}><option value="(0,1)">(0,1)</option><option value="(1,1)">(1,1)</option><option value="(0,n)">(0,n)</option><option value="(1,n)">(1,n)</option></select></label>
 }
 
-function RelationshipEditor({ relationship, store, onDone }: any) {
-  const [name, setName] = useState(relationship.name)
+function CardinalityExplanation({ entityName, relationshipName, value }: { entityName: string; relationshipName: string; value: Cardinality }) {
+  const meaning = describeCardinality(value, entityName, relationshipName)
+  return <div className="cardinality-explanation"><div className="cardinality-summary"><code>{meaning.code}</code><span>{meaning.participation} · {meaning.multiplicity}</span></div><p>{meaning.sentence}</p></div>
+}
+
+function RelationshipEditor({ relationship, draft, store, onDone }: any) {
+  const [name, setName] = useState(draft ? '' : relationship.name)
   const save = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) store.renameRelationship(relationship.id, name.trim()); onDone() }
-  return <form className="form-stack" onSubmit={save}><label>Nombre de la relación<input autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button" disabled={!name.trim()}><Check size={17} />Guardar cambios</button></form>
+  return <form className="form-stack dialog-form" onSubmit={save}><label>Nombre de la relación<EditorTextInput autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar cambios</button></form>
 }
 
 function CardinalityEditor({ relationship, entities, store, onDone }: any) {
   const [parts, setParts] = useState(relationship.participants.map((p: any) => ({ ...p.cardinality })))
   const save = (e: React.FormEvent) => { e.preventDefault(); relationship.participants.forEach((p: any, i: number) => store.updateParticipant(relationship.id, p.entityId, parts[i])); onDone() }
-  return <form className="form-stack" onSubmit={save}>{relationship.participants.map((p: any, i: number) => <CardinalitySelect key={p.entityId} label={entities.find((e: any) => e.id === p.entityId)?.name} value={parts[i]} onChange={c => setParts((old: any[]) => old.map((v, n) => n === i ? c : v))} />)}<button className="primary-button"><Check size={17} />Guardar cardinalidades</button></form>
+  return <form className="form-stack dialog-form" onSubmit={save}>
+    {relationship.participants.map((p: any, i: number) => {
+      const entityName = entities.find((e: any) => e.id === p.entityId)?.name ?? 'esta entidad'
+      return <div className="cardinality-option" key={p.entityId}>
+        <CardinalitySelect label={entityName} value={parts[i]} onChange={c => setParts((old: any[]) => old.map((v, n) => n === i ? c : v))} />
+        <CardinalityExplanation entityName={entityName} relationshipName={relationship.name || 'esta relación'} value={parts[i]} />
+      </div>
+    })}
+    <button className="primary-button dialog-submit"><Check size={17} />Guardar cardinalidades</button>
+  </form>
 }
 
 function AppearanceEditor({ view, store, onDone }: any) {
   const [custom, setCustom] = useState<CustomTheme>(view.customTheme ?? { background: '#f7f5ef', entity: '#fffdf8', relationship: '#f0ebe1', ink: '#26231f', font: 'serif' })
   const layoutMode = view.layoutMode ?? 'structured'
-  return <div className="appearance-stack"><p className="section-kicker">Estilo del diagrama</p><div className="theme-grid">{([['academic', 'Académico', 'paper'], ['warm', 'Cálido', 'warm'], ['modern', 'Moderno', 'modern']] as const).map(([id, label, klass]) => <button type="button" className={`theme-card ${view.theme === id ? 'selected' : ''}`} key={id} onClick={() => store.setTheme(id)}><span className={`theme-preview ${klass}`}><b /><i /></span><span>{label}</span></button>)}</div><div className="layout-mode-section"><p className="section-kicker">Distribución</p><div className="segmented layout-mode-toggle" role="group" aria-label="Modo de distribución del diagrama"><button type="button" className={layoutMode === 'structured' ? 'active' : ''} aria-pressed={layoutMode === 'structured'} onClick={() => store.setLayoutMode('structured')}>Estructurado</button><button type="button" className={layoutMode === 'freeform' ? 'active' : ''} aria-pressed={layoutMode === 'freeform'} onClick={() => store.setLayoutMode('freeform')}>Libre</button></div><p className="layout-mode-help">Estructurado ajusta entidades y relaciones a una cuadrícula de 24 px.</p></div><div className="custom-toggle"><span>Colores personalizados</span><small>Opcional</small></div><div className="color-fields">{([['background', 'Fondo'], ['entity', 'Entidad'], ['relationship', 'Relación'], ['ink', 'Tinta']] as const).map(([key, label]) => <label key={key}>{label}<input type="color" value={custom[key]} onChange={e => { const next = { ...custom, [key]: e.target.value }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }} /></label>)}</div><label className="font-select">Tipografía<select value={custom.font} onChange={e => { const font = e.target.value as 'serif' | 'sans'; const next = { ...custom, font }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }}><option value="serif">Serif académica</option><option value="sans">Sans moderna</option></select></label><button type="button" className="secondary-button full-button" onClick={onDone}>Listo</button></div>
+  return <div className="appearance-stack dialog-stack"><p className="section-kicker">Estilo del diagrama</p><div className="theme-grid">{([['academic', 'Académico', 'paper'], ['warm', 'Cálido', 'warm'], ['modern', 'Moderno', 'modern']] as const).map(([id, label, klass]) => <button type="button" className={`theme-card ${view.theme === id ? 'selected' : ''}`} key={id} onClick={() => store.setTheme(id)}><span className={`theme-preview ${klass}`}><b /><i /></span><span>{label}</span></button>)}</div><div className="layout-mode-section"><p className="section-kicker">Distribución</p><div className="segmented layout-mode-toggle" role="group" aria-label="Modo de distribución del diagrama"><button type="button" className={layoutMode === 'structured' ? 'active' : ''} aria-pressed={layoutMode === 'structured'} onClick={() => store.setLayoutMode('structured')}>Estructurado</button><button type="button" className={layoutMode === 'freeform' ? 'active' : ''} aria-pressed={layoutMode === 'freeform'} onClick={() => store.setLayoutMode('freeform')}>Libre</button></div><p className="layout-mode-help">Estructurado ajusta entidades y relaciones a una cuadrícula de 24 px.</p></div><div className="custom-toggle"><span>Colores personalizados</span><small>Opcional</small></div><div className="color-fields">{([['background', 'Fondo'], ['entity', 'Entidad'], ['relationship', 'Relación'], ['ink', 'Tinta']] as const).map(([key, label]) => <label key={key}>{label}<input type="color" value={custom[key]} onChange={e => { const next = { ...custom, [key]: e.target.value }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }} /></label>)}</div><label className="font-select">Tipografía<select value={custom.font} onChange={e => { const font = e.target.value as 'serif' | 'sans'; const next = { ...custom, font }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }}><option value="serif">Serif académica</option><option value="sans">Sans moderna</option></select></label><button type="button" className="secondary-button full-button dialog-submit" onClick={onDone}>Listo</button></div>
 }
 
 function DiagramMenu({ diagram, store, onClose, onToast }: any) {
   const [name, setName] = useState(diagram.name)
   const rename = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) store.setDiagramName(name.trim()); onClose() }
   const reset = (mode: 'blank' | 'sample') => { if (window.confirm(mode === 'blank' ? '¿Crear un diagrama vacío? Se reemplazará el contenido actual.' : '¿Restaurar el diagrama de ejemplo?')) { store.resetDiagram(mode); onClose(); onToast('Diagrama actualizado') } }
-  return <div className="menu-stack"><form onSubmit={rename} className="form-stack"><label>Nombre del diagrama<input autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button></div>
+  return <div className="menu-stack dialog-stack"><form onSubmit={rename} className="form-stack dialog-form"><label>Nombre del diagrama<EditorTextInput autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="shortcut-list" aria-label="Atajos de teclado"><p className="section-kicker">Atajos de teclado</p><div><kbd>E</kbd><span>Nueva entidad</span><kbd>A</kbd><span>Atributo</span></div><div><kbd>R</kbd><span>Relación</span><kbd>Enter</kbd><span>Renombrar</span></div><div><kbd>F</kbd><span>Ajustar vista</span><kbd>⌘/Ctrl Z</kbd><span>Deshacer</span></div></div><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button></div>
 }
 
 function customStyle(theme?: CustomTheme): React.CSSProperties | undefined {

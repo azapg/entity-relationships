@@ -11,7 +11,8 @@ export const ATTRIBUTE_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE }
 export const ATTRIBUTE_GAP = GRID_SIZE
 export const TERMINAL_SIZE = 12
 export const MAX_ENTITY_WIDTH = GRID_SIZE * 20
-export const DIAMOND_INSET = 1
+/** Keep the diamond tips on the same grid boundary as the node box. */
+export const DIAMOND_INSET = 0
 
 // Semantic order is also the stable tie-break for automatic placement.
 export const SIDES: readonly AttributeSide[] = ['north', 'south', 'east', 'west']
@@ -88,8 +89,10 @@ const sideAssignment = (value: unknown): AttributeSide | undefined => {
   return undefined
 }
 
-/** Pick the least populated side, with stable tie breaking. A connection on a
- * side is a soft penalty, not a solver: this keeps diagrams predictable. */
+/** Pick sides in two passes. Existing assignments remain stable while their
+ * side is clear, but a participant connector is a hard blocker when there is
+ * another side available. This is important after a relationship is moved:
+ * the connector can change sides without changing the attribute metadata. */
 export function allocateAttributeSides(
   attributes: Attribute[],
   assignments: Record<string, unknown> = {},
@@ -97,16 +100,32 @@ export function allocateAttributeSides(
 ): Record<string, AttributeSide> {
   const counts: Record<AttributeSide, number> = { north: 0, east: 0, south: 0, west: 0 }
   const result: Record<string, AttributeSide> = {}
+
+  // Preserve clear assignments first. Attributes whose old side is now used
+  // by a relationship are intentionally left for the second pass.
   attributes.forEach((attribute) => {
     const assigned = sideAssignment(assignments[attribute.id])
-    if (assigned) {
+    if (assigned && !(occupiedSides[assigned] ?? 0)) {
       result[attribute.id] = assigned
       counts[assigned] += 1
-      return
     }
+  })
+
+  attributes.forEach((attribute) => {
+    if (result[attribute.id]) return
+    const assigned = sideAssignment(assignments[attribute.id])
     const side = SIDES.reduce((best, candidate) => {
-      const candidateScore = counts[candidate] + (occupiedSides[candidate] ?? 0) * 1.5
-      const bestScore = counts[best] + (occupiedSides[best] ?? 0) * 1.5
+      const candidateOccupied = occupiedSides[candidate] ?? 0
+      const bestOccupied = occupiedSides[best] ?? 0
+      // Keep connectors and attribute stems on separate sides whenever the
+      // four sides make that possible. If all sides are occupied, the
+      // connector count still gives the least crowded side the preference.
+      const candidateScore = counts[candidate]
+        + (candidateOccupied ? 1000 + candidateOccupied * 10 : 0)
+        + (assigned === candidate ? 0.25 : 0)
+      const bestScore = counts[best]
+        + (bestOccupied ? 1000 + bestOccupied * 10 : 0)
+        + (assigned === best ? 0.25 : 0)
       return candidateScore < bestScore ? candidate : best
     }, SIDES[0])
     result[attribute.id] = side
@@ -355,6 +374,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
       data: {
         semanticId: relationship.id, kind: 'relationship', label: relationship.name,
         selected: selectedFor(selectedId, relationship.id), width: RELATION_SIZE.width, height: RELATION_SIZE.height,
+        cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
       },
     })
   })
@@ -398,7 +418,13 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
         id: `participant-edge:${relationship.id}:${participant.entityId}:${index}`,
         type: 'connector', source: nodeId('entity', participant.entityId), target: nodeId('relationship', relationship.id),
         sourceHandle: staticHandleId('source', side), targetHandle: staticHandleId('target', oppositeSide(side)),
-        data: { connectorKind: 'participant', cardinality: participant.cardinality, selected: selectedFor(selectedId, relationship.id) },
+        data: {
+          connectorKind: 'participant',
+          relationshipId: relationship.id,
+          cardinality: participant.cardinality,
+          cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
+          selected: selectedFor(selectedId, relationship.id),
+        },
       })
     })
   })

@@ -7,10 +7,13 @@ import { cardinalityLabel } from '../../domain/types'
 
 export type ConnectorData = {
   connectorKind?: 'participant' | 'attribute'
+  relationshipId?: string
   cardinality?: Cardinality
   side?: 'north' | 'east' | 'south' | 'west'
   sourceKind?: 'entity' | 'relationship'
   selected?: boolean
+  cardinalityPending?: boolean
+  onCardinalityDoubleClick?: () => void
 }
 
 type ConnectorEdgeType = Edge<ConnectorData>
@@ -87,7 +90,7 @@ export function ConnectorEdge({
     { x: sourceX, y: sourceY }, { x: targetX, y: targetY }, sourcePosition, targetPosition,
   )
   const cardinality = data?.connectorKind === 'participant' && data.cardinality
-    ? cardinalityLabel(data.cardinality)
+    ? data.cardinalityPending ? '(?)' : cardinalityLabel(data.cardinality)
     : undefined
   const label = cardinality ? cardinalityLabelPosition(points) : undefined
 
@@ -102,8 +105,12 @@ export function ConnectorEdge({
       {cardinality && label && (
         <EdgeLabelRenderer>
           <span
-            className="chen-cardinality-label nopan"
+            className={`chen-cardinality-label nopan${data?.onCardinalityDoubleClick ? ' is-editable' : ''}`}
             style={{ transform: `translate(-50%, -50%) translate(${label.x}px,${label.y}px)` }}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              data?.onCardinalityDoubleClick?.()
+            }}
           >
             {cardinality}
           </span>

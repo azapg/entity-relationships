@@ -225,4 +225,50 @@ describe('modelo semántico del diagrama', () => {
     state().setLayoutMode('freeform')
     expect(state().diagram.view.positions[entityId]).toEqual(canonical)
   })
+
+  it('creates an existing-target relationship through one shared flow command', () => {
+    const sourceId = state().createEntity('SOURCE', 'strong', { x: 101, y: 131 })
+    const targetId = state().createEntity('TARGET', 'strong', { x: 509, y: 131 })
+    const result = state().createRelationshipFlow(sourceId, targetId, 'USES', {
+      cardinalitiesPending: true,
+      sourceSide: 'east',
+    })
+
+    expect(result?.entityId).toBe(targetId)
+    expect(state().diagram.relationships).toHaveLength(1)
+    const relationship = state().diagram.relationships[0]
+    expect(relationship.participants.map(({ entityId }) => entityId)).toEqual([sourceId, targetId])
+    expect(state().diagram.view.positions[relationship.id].x % GRID_SIZE).toBe(0)
+    expect(state().diagram.view.positions[relationship.id].y % GRID_SIZE).toBe(0)
+    expect(state().diagram.view.pendingCardinalities?.[relationship.id]).toBe(true)
+
+    state().updateParticipant(relationship.id, sourceId, { min: 1, max: 1 })
+    expect(state().diagram.view.pendingCardinalities?.[relationship.id]).toBeUndefined()
+  })
+
+  it('creates a new target entity and relationship as one undoable operation', () => {
+    const sourceId = state().createEntity('SOURCE', 'strong', { x: 0, y: 0 })
+    const result = state().createRelationshipFlow(sourceId, {
+      name: 'TARGET',
+      position: { x: 317, y: 149 },
+    }, 'CONNECTS', { cardinalitiesPending: true })
+
+    expect(result).not.toBeNull()
+    expect(state().diagram.entities).toHaveLength(2)
+    expect(state().diagram.relationships).toHaveLength(1)
+    expect(state().diagram.view.positions[result!.entityId]).toEqual({ x: 312, y: 144 })
+    expect(state().diagram.view.pendingCardinalities?.[result!.relationshipId]).toBe(true)
+
+    state().undo()
+    expect(state().diagram.entities).toHaveLength(1)
+    expect(state().diagram.relationships).toHaveLength(0)
+  })
+
+  it('keeps a completed major-node move undoable as one operation', () => {
+    const entityId = state().createEntity('MOVABLE', 'strong', { x: 0, y: 0 })
+    state().setPosition(entityId, { x: 101, y: 131 })
+    expect(state().diagram.view.positions[entityId]).toEqual({ x: 96, y: 120 })
+    state().undo()
+    expect(state().diagram.view.positions[entityId]).toEqual({ x: 0, y: 0 })
+  })
 })

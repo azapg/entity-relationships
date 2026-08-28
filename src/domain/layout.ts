@@ -28,6 +28,33 @@ export const snapPoint = (point: Point, gridSize = GRID_SIZE): Point => ({
   y: snapCoordinate(point.y, gridSize),
 })
 
+/**
+ * Default placement for a relationship created from two entity positions.
+ * The result is a relationship top-left coordinate, not its center. Keeping
+ * this in the view/layout layer makes gesture and sheet creation share the
+ * same deterministic geometry without putting React Flow in the domain.
+ */
+export const relationshipPositionBetween = (
+  source: Point,
+  target: Point,
+  sourceWidth = GRID_SIZE * 8,
+  targetWidth = GRID_SIZE * 8,
+  sourceSide?: AttributeSide,
+): Point => ({
+  x: (
+    source.x + sourceWidth / 2 + target.x + targetWidth / 2
+    + (source.x === target.x && source.y === target.y
+      ? sourceSide === 'east' ? GRID_SIZE * 5 : sourceSide === 'west' ? -GRID_SIZE * 5 : 0
+      : 0)
+  ) / 2 - GRID_SIZE * 2,
+  y: (
+    source.y + GRID_SIZE * 2 + target.y + GRID_SIZE * 2
+    + (source.x === target.x && source.y === target.y
+      ? sourceSide === 'south' ? GRID_SIZE * 5 : sourceSide === 'north' ? -GRID_SIZE * 5 : 0
+      : 0)
+  ) / 2 - GRID_SIZE * 2,
+})
+
 export const isAttributeSide = (value: unknown): value is AttributeSide =>
   typeof value === 'string' && ATTRIBUTE_SIDES.includes(value as AttributeSide)
 

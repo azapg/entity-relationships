@@ -15,6 +15,14 @@ export type AttributeHandleLayout = {
   offset: number
 }
 
+export type NodeActionHandlers = {
+  addAttribute?: () => void
+  createRelationship?: () => void
+  rename?: () => void
+  editCardinality?: () => void
+  delete?: () => void
+}
+
 export type DiagramNodeKind = 'entity' | 'relationship' | 'attribute'
 
 export type DiagramNodeData = Record<string, unknown> & {
@@ -30,6 +38,9 @@ export type DiagramNodeData = Record<string, unknown> & {
   attributeHandles?: AttributeHandleLayout[]
   width?: number
   height?: number
+  hovered?: boolean
+  cardinalityPending?: boolean
+  actions?: NodeActionHandlers
 }
 
 export type RenderedDiagram = {

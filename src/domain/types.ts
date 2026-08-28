@@ -48,6 +48,8 @@ export type DiagramView = {
   positions: Record<string, Point>
   layoutMode: LayoutMode
   attributeLayout: Record<string, { side: AttributeSide }>
+  /** View-only marker for relationships created before cardinalities are set. */
+  pendingCardinalities?: Record<string, true>
   customTheme?: CustomTheme
 }
 
