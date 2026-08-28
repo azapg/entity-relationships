@@ -67,9 +67,8 @@ function syncSystemUi(view: Diagram['view']) {
       : LIGHT_SURFACE
   const darkSurface = isDarkSurface(surface)
 
-  document.documentElement.style.backgroundColor = surface
+  document.documentElement.style.setProperty('--system-surface', surface)
   document.documentElement.style.colorScheme = darkSurface ? 'dark' : 'light'
-  if (document.body) document.body.style.backgroundColor = surface
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', surface)
   document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', darkSurface ? 'black-translucent' : 'default')
 }
