@@ -4,17 +4,19 @@ import type { DiagramNodeData } from '../types'
 type AttributeNodeData = DiagramNodeData & {
   key?: boolean
   lane?: 'north' | 'east' | 'south' | 'west'
+  side?: 'north' | 'east' | 'south' | 'west'
 }
 
 /** The terminal handle is laid over the visual marker so stems have no gap. */
 type AttributeNodeType = Node<AttributeNodeData, 'attribute'>
 
 export function AttributeNode({ data, selected }: NodeProps<AttributeNodeType>) {
-  const lane = data.lane ?? 'east'
+  const lane = data.side ?? data.lane ?? 'east'
   return (
     <div
       className={`chen-node chen-attribute-node chen-attribute-node--${lane}${selected || data.selected ? ' is-selected' : ''}`}
       aria-label={`Atributo ${data.label}`}
+      style={{ width: 192, height: 24 }}
     >
       <span className={`chen-attribute-node__terminal${data.key ? ' is-key' : ''}`} aria-hidden="true" />
       <span className={`chen-node__label${data.key ? ' is-key' : ''}`}>{data.label || 'Sin nombre'}</span>
