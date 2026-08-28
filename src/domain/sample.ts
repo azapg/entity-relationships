@@ -47,9 +47,9 @@ export const createSampleDiagram = (): Diagram => ({
     renderer: 'chen-stem',
     theme: 'academic',
     positions: {
-      [sampleId('student')]: { x: 120, y: 220 },
-      [sampleId('enrolls')]: { x: 430, y: 260 },
-      [sampleId('course')]: { x: 740, y: 220 },
+      [sampleId('student')]: { x: 120, y: 216 },
+      [sampleId('enrolls')]: { x: 432, y: 264 },
+      [sampleId('course')]: { x: 744, y: 216 },
     },
     layoutMode: 'structured',
     attributeLayout: {

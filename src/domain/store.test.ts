@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createSampleDiagram } from './sample'
+import { GRID_SIZE } from './layout'
 import { persistDiagram, readPersistedDiagram, STORAGE_KEY, STORAGE_VERSION, useDiagramStore } from './store'
 
 const state = () => useDiagramStore.getState()
@@ -32,6 +33,8 @@ describe('modelo semántico del diagrama', () => {
     expect(sample.relationships[0].participants).toHaveLength(2)
     expect(sample.entities[0].attributes.find((attribute) => attribute.key)?.name).toBe('estudiante_id')
     expect(sample.view.theme).toBe('academic')
+    expect(Object.values(sample.view.positions).every(({ x, y }) =>
+      x % GRID_SIZE === 0 && y % GRID_SIZE === 0)).toBe(true)
   })
 
   it('migra las etiquetas inglesas de la muestra persistida y conserva su configuración', () => {
@@ -59,7 +62,7 @@ describe('modelo semántico del diagrama', () => {
       expect(migrated?.entities[1].attributes.map((attribute) => attribute.name)).toEqual(['curso_id', 'título'])
       expect(migrated?.relationships[0].name).toBe('INSCRIBE')
       expect(migrated?.relationships[0].attributes[0].name).toBe('calificación')
-      expect(migrated?.view.positions['sample-student']).toEqual({ x: 999, y: 888 })
+      expect(migrated?.view.positions['sample-student']).toEqual({ x: 1008, y: 888 })
       expect(migrated?.view.theme).toBe('modern')
 
       const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!)
@@ -127,7 +130,7 @@ describe('modelo semántico del diagrama', () => {
     expect(state().diagram.entities[0].name).toBe('STUDENT')
   })
 
-  it('normaliza diagramas antiguos sin tocar posiciones ni contenido personalizado', () => {
+  it('normaliza diagramas antiguos y conserva el contenido personalizado', () => {
     const storage = memoryStorage()
     const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
@@ -146,7 +149,7 @@ describe('modelo semántico del diagrama', () => {
 
       const loaded = readPersistedDiagram()!
       expect(loaded.view.layoutMode).toBe('structured')
-      expect(loaded.view.positions['sample-student']).toEqual({ x: 11, y: 37 })
+      expect(loaded.view.positions['sample-student']).toEqual({ x: 0, y: 48 })
       expect(loaded.view.attributeLayout['sample-student-id'].side).toMatch(/north|east|south|west/)
       const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!)
       expect(persisted.diagram.view.layoutMode).toBe('structured')
@@ -195,5 +198,31 @@ describe('modelo semántico del diagrama', () => {
     expect(layout[one]).toEqual({ side: 'north' })
     expect(layout[two]).toEqual({ side: 'east' })
     expect(state().diagram.entities.find((entity) => entity.id === entityId)).toEqual(original)
+  })
+
+  it('preserves fractional coordinates when a freeform diagram is normalized and persisted', () => {
+    const storage = memoryStorage()
+    const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
+
+    try {
+      const freeform = createSampleDiagram()
+      freeform.view.layoutMode = 'freeform'
+      freeform.view.positions['sample-student'] = { x: 11.25, y: 37.5 }
+      persistDiagram(freeform)
+      const loaded = readPersistedDiagram()!
+      expect(loaded.view.layoutMode).toBe('freeform')
+      expect(loaded.view.positions['sample-student']).toEqual({ x: 11.25, y: 37.5 })
+    } finally {
+      if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage)
+      else Reflect.deleteProperty(globalThis, 'localStorage')
+    }
+  })
+
+  it('keeps canonical structured coordinates unchanged when entering freeform', () => {
+    const entityId = state().createEntity('ACCOUNT', 'strong', { x: 101, y: 131 })
+    const canonical = { ...state().diagram.view.positions[entityId] }
+    state().setLayoutMode('freeform')
+    expect(state().diagram.view.positions[entityId]).toEqual(canonical)
   })
 })

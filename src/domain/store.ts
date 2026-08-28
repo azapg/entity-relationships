@@ -21,7 +21,11 @@ import {
   type AttributeOwner,
   type AttributePatch,
 } from './commands'
-import { ensureAttributeLayout, normalizeLayoutMode } from './layout'
+import {
+  ensureAttributeLayout,
+  normalizeLayoutMode,
+  snapMajorPositions,
+} from './layout'
 import { createBlankDiagram, createSampleDiagram } from './sample'
 import type {
   Attribute,
@@ -177,11 +181,12 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
   const attributeLayout = legacyView.attributeLayout && typeof legacyView.attributeLayout === 'object'
     ? legacyView.attributeLayout as Diagram['view']['attributeLayout']
     : {}
+  const layoutMode = normalizeLayoutMode(legacyView.layoutMode)
   const candidate = {
     ...diagram,
     view: {
       ...diagram.view,
-      layoutMode: normalizeLayoutMode(legacyView.layoutMode),
+      layoutMode,
       attributeLayout,
     },
   }
@@ -190,15 +195,17 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
     ...diagram.relationships.flatMap((relationship) =>
       relationship.attributes.map((attribute) => attribute.id)),
   ])
+  const positions = layoutMode === 'freeform'
+    ? { ...diagram.view.positions }
+    : snapMajorPositions(candidate)
   return {
     ...candidate,
     view: {
       ...candidate.view,
-      // Migration never moves a user's existing objects. Switching to
-      // Structured explicitly performs the grid snap as one history action.
-      positions: Object.fromEntries(
-        Object.entries(diagram.view.positions).filter(([id]) => !attributeIds.has(id)),
-      ),
+      // Structured diagrams retain a canonical grid position; freeform
+      // diagrams retain the user's exact coordinates.
+      positions: Object.fromEntries(Object.entries(positions)
+        .filter(([id]) => !attributeIds.has(id))),
       attributeLayout: ensureAttributeLayout(candidate),
     },
   }
