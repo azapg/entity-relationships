@@ -7,7 +7,9 @@ import {
   Controls,
   MiniMap,
   useReactFlow,
+  applyNodeChanges,
   type Node,
+  type NodeChange,
 } from '@xyflow/react'
 import {
   Plus, MoreHorizontal, Undo2, Redo2, Maximize, Type, Link2, Pencil,
@@ -19,34 +21,88 @@ import { useDiagramStore } from './domain/store'
 import type { Cardinality, CustomTheme, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
 import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
+import type { DiagramNodeData } from './renderers/types'
 
 type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'appearance' | 'menu' | null
+
+// React Flow temporarily hides a node while measuring it when a controlled
+// update replaces the user node and drops its measured dimensions. Dragging
+// does exactly that on every pointer frame, so provide the fixed Chen layout
+// dimensions up front and keep the nodes visible throughout the drag.
+function withStableNodeDimensions(rendered: ReturnType<typeof renderDiagram>) {
+  return {
+    ...rendered,
+    nodes: rendered.nodes.map((node) => {
+      const dimensions = node.data.kind === 'entity'
+        ? { width: 170, height: 92 }
+        : node.data.kind === 'relationship'
+          ? { width: 132, height: 92 }
+          : { width: 160, height: 38 }
+      return { ...node, ...dimensions }
+    }),
+  }
+}
 
 function CanvasViewport({ diagram, selection, onSelect, onMove }: {
   diagram: any; selection: SemanticSelection; onSelect: (s: SemanticSelection) => void; onMove: (id: string, p: { x: number; y: number }) => void
 }) {
   const rf = useReactFlow()
-  // React Flow is controlled by the semantic projection, but positions are
-  // intentionally persisted only once a drag finishes. Keep the in-progress
-  // position local so the node and all of its derived edges can follow the
-  // pointer without creating a store update for every pointer event.
-  const [dragPositions, setDragPositions] = useState<Record<string, Point>>({})
-  const rendered = useMemo(() => {
-    const activePositions = Object.keys(dragPositions).length > 0
-      ? { ...diagram.view.positions, ...dragPositions }
-      : diagram.view.positions
-    const renderDiagramSource = activePositions === diagram.view.positions
-      ? diagram
-      : { ...diagram, view: { ...diagram.view, positions: activePositions } }
-    return renderDiagram(renderDiagramSource, selection?.id)
-  }, [diagram, selection, dragPositions])
+  // React Flow is controlled locally during a drag. Re-projecting the whole
+  // semantic diagram for every pointer event replaces every node and edge,
+  // which makes React Flow lose its drag state and visibly flicker. The
+  // semantic model is still updated once, on drag stop, below.
+  const initialRendered = useMemo(() => withStableNodeDimensions(renderDiagram(diagram, selection?.id)), [diagram, selection])
+  const [nodes, setNodes] = useState<Node<DiagramNodeData>[]>(initialRendered.nodes)
+  const [edges, setEdges] = useState(initialRendered.edges)
 
-  // If the model changes while a drag is being cancelled/interrupted (for
-  // example by deleting or resetting the diagram), never let an old transient
-  // position override the next canonical projection.
+  // Any canonical model change (including reset, undo, redo, or an update
+  // from elsewhere) replaces the local projection. This effect does not
+  // depend on local nodes, so it cannot form a render loop while dragging.
   useEffect(() => {
-    setDragPositions({})
-  }, [diagram])
+    const next = withStableNodeDimensions(renderDiagram(diagram, selection?.id))
+    setNodes(next.nodes)
+    setEdges(next.edges)
+  }, [diagram, selection])
+
+  const onNodesChange = useCallback((changes: NodeChange<Node<DiagramNodeData>>[]) => {
+    setNodes((current) => {
+      const currentById = new Map(current.map((node) => [node.id, node]))
+      const ownerDeltas = new Map<string, Point>()
+
+      // Attribute nodes are derived from their owner and intentionally are not
+      // draggable themselves. Translate them by the same frame delta so their
+      // stems and their marker remain attached throughout the drag.
+      changes.forEach((change) => {
+        if (change.type !== 'position' || !change.position) return
+        const owner = currentById.get(change.id)
+        if (!owner) return
+        const data: any = owner?.data
+        if (data?.kind !== 'entity' && data?.kind !== 'relationship') return
+        ownerDeltas.set(`${data.kind}:${data.semanticId ?? change.id}`, {
+          x: change.position.x - owner.position.x,
+          y: change.position.y - owner.position.y,
+        })
+      })
+
+      const changed = applyNodeChanges<Node<DiagramNodeData>>(changes, current)
+      if (ownerDeltas.size === 0) return changed
+
+      return changed.map((node) => {
+        const data: any = node.data
+        if (data?.kind !== 'attribute') return node
+        const delta = ownerDeltas.get(`${data.ownerKind}:${data.ownerId}`)
+        const previous = currentById.get(node.id)
+        if (!delta || !previous) return node
+        return {
+          ...node,
+          position: {
+            x: previous.position.x + delta.x,
+            y: previous.position.y + delta.y,
+          },
+        }
+      })
+    })
+  }, [])
 
   const selectNode = useCallback((_: React.MouseEvent, node: Node) => {
     const data: any = node.data
@@ -56,37 +112,23 @@ function CanvasViewport({ diagram, selection, onSelect, onMove }: {
 
   return <div className="canvas-wrap">
     <ReactFlow
-      nodes={rendered.nodes}
-      edges={rendered.edges}
+      nodes={nodes}
+      edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodeClick={selectNode}
       onPaneClick={() => onSelect(null)}
-      onNodeDrag={(_, node) => {
-        const d: any = node.data
-        if (d.kind === 'entity' || d.kind === 'relationship') {
-          setDragPositions((current) => ({
-            ...current,
-            [d.semanticId ?? node.id]: { x: node.position.x, y: node.position.y },
-          }))
-        }
-      }}
       onNodeDragStop={(_, node) => {
         const d: any = node.data
         if (d.kind === 'entity' || d.kind === 'relationship') {
           const id = d.semanticId ?? node.id
           const position = { x: node.position.x, y: node.position.y }
-          // One canonical write per completed drag; transient updates above
-          // stay local and therefore do not pollute persistence/history.
+          // One canonical write per completed drag; all pointer-frame updates
+          // above stay local and therefore do not pollute persistence/history.
           onMove(id, position)
-          setDragPositions((current) => {
-            if (!(id in current)) return current
-            const next = { ...current }
-            delete next[id]
-            return next
-          })
         }
       }}
+      onNodesChange={onNodesChange}
       fitView
       fitViewOptions={{ padding: 0.12, minZoom: 0.25, maxZoom: 1.2 }}
       panOnDrag
