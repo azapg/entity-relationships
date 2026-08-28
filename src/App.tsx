@@ -45,6 +45,35 @@ const REACT_FLOW_LABELS = {
   'handle.ariaLabel': 'Conector',
 }
 
+const LIGHT_SURFACE = '#fbf9f4'
+const DARK_SURFACE = '#14120f'
+
+function isDarkSurface(color: string) {
+  const match = color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  if (!match) return false
+  const hex = match[1].length === 3
+    ? match[1].split('').map((channel) => channel + channel).join('')
+    : match[1]
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255)
+  const linear = channels.map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+  return (0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]) < 0.5
+}
+
+function syncSystemUi(view: Diagram['view']) {
+  const surface = view.theme === 'modern'
+    ? DARK_SURFACE
+    : view.theme === 'custom'
+      ? view.customTheme?.background ?? LIGHT_SURFACE
+      : LIGHT_SURFACE
+  const darkSurface = isDarkSurface(surface)
+
+  document.documentElement.style.backgroundColor = surface
+  document.documentElement.style.colorScheme = darkSurface ? 'dark' : 'light'
+  if (document.body) document.body.style.backgroundColor = surface
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', surface)
+  document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', darkSurface ? 'black-translucent' : 'default')
+}
+
 function NightingaleMark({ className = '' }: { className?: string }) {
   return <span
     className={`nightingale-mark ${className}`.trim()}
@@ -559,6 +588,10 @@ function EditorApp() {
     document.addEventListener('pointerdown', closeOnOutsidePointer)
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
   }, [selectorOpen])
+
+  useEffect(() => {
+    if (diagram) syncSystemUi(diagram.view)
+  }, [diagram])
 
   const deleteSelected = () => deleteTarget(selection)
 
