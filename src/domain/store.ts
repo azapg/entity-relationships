@@ -45,10 +45,17 @@ import type {
 
 export const STORAGE_KEY = 'er-diagram:v1'
 export const STORAGE_VERSION = 1
+export const DIAGRAMS_STORAGE_KEY = 'er-diagrams:v1'
+export const DIAGRAMS_STORAGE_VERSION = 1
 
 type PersistedDiagram = {
   version: typeof STORAGE_VERSION
   diagram: Diagram
+}
+
+type PersistedDiagrams = {
+  version: typeof DIAGRAMS_STORAGE_VERSION
+  diagrams: Diagram[]
 }
 
 type HistoryState = {
@@ -58,10 +65,13 @@ type HistoryState = {
 
 export type DiagramStore = {
   diagram: Diagram
+  diagrams: Diagram[]
   selection: SemanticSelection
   canUndo: boolean
   canRedo: boolean
   setSelection: (selection: SemanticSelection) => void
+  openDiagram: (id: string) => boolean
+  createDiagram: () => string
   setDiagramName: (name: string) => void
   createEntity: (name: string, kind?: Entity['kind'], position?: Point) => string
   renameEntity: (id: string, name: string) => void
@@ -105,6 +115,7 @@ export type DiagramStore = {
     relationshipId: string,
     entityId: string,
     cardinality: Cardinality,
+    participantIndex?: number,
   ) => void
   deleteRelationship: (id: string) => void
   setPosition: (id: string, point: Point) => void
@@ -140,6 +151,15 @@ const isDiagram = (value: unknown): value is Diagram => {
     candidate.view.renderer === 'chen-stem' &&
     typeof candidate.view.positions === 'object'
   )
+}
+
+const uniqueDiagrams = (diagrams: Diagram[]) => {
+  const seen = new Set<string>()
+  return diagrams.filter((diagram) => {
+    if (seen.has(diagram.id)) return false
+    seen.add(diagram.id)
+    return true
+  })
 }
 
 type LegacySampleLabel = {
@@ -256,15 +276,67 @@ export const readPersistedDiagram = (): Diagram | undefined => {
   }
 }
 
+const readPersistedLibrary = (): Diagram[] | undefined => {
+  const storage = getStorage()
+  if (!storage) return undefined
+  try {
+    const raw = storage.getItem(DIAGRAMS_STORAGE_KEY)
+    if (!raw) return undefined
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return undefined
+    const payload = parsed as Partial<PersistedDiagrams>
+    if (payload.version !== DIAGRAMS_STORAGE_VERSION || !Array.isArray(payload.diagrams)) return undefined
+    const diagrams = uniqueDiagrams(payload.diagrams
+      .filter(isDiagram)
+      .map((diagram) => {
+        const next = normalizeDiagram(cloneDiagram(diagram))
+        migrateLegacySample(next)
+        return next
+      }))
+    return diagrams.length ? diagrams : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export const readPersistedDiagrams = (): Diagram[] =>
+  readPersistedLibrary() ?? (() => {
+    const diagram = readPersistedDiagram()
+    return diagram ? [diagram] : []
+  })()
+
+export const persistDiagrams = (diagrams: Diagram[]) => {
+  const storage = getStorage()
+  if (!storage) return
+  try {
+    const normalized = uniqueDiagrams(diagrams.map((diagram) => {
+      const next = normalizeDiagram(cloneDiagram(diagram))
+      migrateLegacySample(next)
+      return next
+    }))
+    if (!normalized.length) return
+    const payload: PersistedDiagrams = {
+      version: DIAGRAMS_STORAGE_VERSION,
+      diagrams: normalized,
+    }
+    storage.setItem(DIAGRAMS_STORAGE_KEY, JSON.stringify(payload))
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      version: STORAGE_VERSION,
+      diagram: normalized[0],
+    } satisfies PersistedDiagram))
+  } catch {
+    // Persistence is a convenience; private browsing and quota errors are safe to ignore.
+  }
+}
+
 export const persistDiagram = (diagram: Diagram) => {
   const storage = getStorage()
   if (!storage) return
   try {
-    const payload: PersistedDiagram = {
-      version: STORAGE_VERSION,
-      diagram: cloneDiagram(normalizeDiagram(diagram)),
-    }
-    storage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    const next = normalizeDiagram(cloneDiagram(diagram))
+    migrateLegacySample(next)
+    const existing = readPersistedLibrary() ?? []
+    persistDiagrams([next, ...existing.filter((item) => item.id !== next.id)])
   } catch {
     // Persistence is a convenience; private browsing and quota errors are safe to ignore.
   }
@@ -298,34 +370,45 @@ const selectionStillExists = (selection: SemanticSelection, diagram: Diagram) =>
     : diagram.relationships.some((relationship) => relationship.id === selection.id)
 }
 
-const initialDiagram = normalizeDiagram(readPersistedDiagram() ?? createSampleDiagram())
+const initialDiagrams = readPersistedDiagrams()
+const initialDiagram = initialDiagrams[0] ?? normalizeDiagram(createSampleDiagram())
+const initialLibrary = initialDiagrams.length ? initialDiagrams : [initialDiagram]
+
+const putDiagramFirst = (diagrams: Diagram[], diagram: Diagram) => [
+  diagram,
+  ...diagrams.filter((item) => item.id !== diagram.id),
+]
 
 export const useDiagramStore = create<InternalStore>((set, get) => {
   const commit = (next: Diagram) => {
     const current = get().diagram
     if (next === current) return false
     const selection = get().selection
+    const diagrams = putDiagramFirst(get().diagrams, next)
     set((state) => ({
       diagram: next,
+      diagrams,
       past: [...state.past, current],
       future: [],
       canUndo: true,
       canRedo: false,
       selection: selectionStillExists(selection, next) ? selection : null,
     }))
-    persistDiagram(next)
+    persistDiagrams(diagrams)
     return true
   }
 
   const commitWithoutHistory = (next: Diagram) => {
     if (next === get().diagram) return false
-    set({ diagram: next })
-    persistDiagram(next)
+    const diagrams = putDiagramFirst(get().diagrams, next)
+    set({ diagram: next, diagrams })
+    persistDiagrams(diagrams)
     return true
   }
 
   return {
     diagram: initialDiagram,
+    diagrams: initialLibrary,
     selection: null,
     past: [],
     future: [],
@@ -334,6 +417,40 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
 
     setSelection: (selection) => {
       if (selectionStillExists(selection, get().diagram)) set({ selection })
+    },
+
+    openDiagram: (id) => {
+      const state = get()
+      const next = state.diagrams.find((item) => item.id === id)
+      if (!next) return false
+      const diagrams = putDiagramFirst(state.diagrams, next)
+      set({
+        diagram: cloneDiagram(next),
+        diagrams,
+        selection: null,
+        past: [],
+        future: [],
+        canUndo: false,
+        canRedo: false,
+      })
+      persistDiagrams(diagrams)
+      return true
+    },
+
+    createDiagram: () => {
+      const next = createBlankDiagram()
+      const diagrams = putDiagramFirst(get().diagrams, next)
+      set({
+        diagram: next,
+        diagrams,
+        selection: null,
+        past: [],
+        future: [],
+        canUndo: false,
+        canRedo: false,
+      })
+      persistDiagrams(diagrams)
+      return next.id
     },
 
     setDiagramName: (name) => {
@@ -377,10 +494,8 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
 
     createRelationship: (name, participants, position) => {
       const entityIds = new Set(get().diagram.entities.map((entity) => entity.id))
-      const uniqueEntityIds = new Set(participants.map((participant) => participant.entityId))
       if (
         participants.length < 2 ||
-        uniqueEntityIds.size !== participants.length ||
         participants.some((participant) => !entityIds.has(participant.entityId))
       ) {
         return ''
@@ -425,7 +540,7 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
 
       if (typeof target === 'string') {
         const targetEntity = current.entities.find((entity) => entity.id === target)
-        if (!targetEntity || targetEntity.id === sourceEntityId) return null
+        if (!targetEntity) return null
         targetEntityId = targetEntity.id
         targetPosition = current.view.positions[targetEntity.id]
           ?? defaultEntityPosition(current.entities.findIndex((entity) => entity.id === targetEntity.id))
@@ -468,8 +583,8 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       commit(renameRelationshipCommand(get().diagram, id, name))
     },
 
-    updateParticipant: (relationshipId, entityId, cardinality) => {
-      commit(patchParticipant(get().diagram, relationshipId, entityId, { ...cardinality }))
+    updateParticipant: (relationshipId, entityId, cardinality, participantIndex) => {
+      commit(patchParticipant(get().diagram, relationshipId, entityId, { ...cardinality }, participantIndex))
     },
 
     deleteRelationship: (id) => {
@@ -510,13 +625,14 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       if (!previous) return
       set({
         diagram: previous,
+        diagrams: putDiagramFirst(state.diagrams, previous),
         past: state.past.slice(0, -1),
         future: [state.diagram, ...state.future],
         canUndo: state.past.length > 1,
         canRedo: true,
         selection: selectionStillExists(state.selection, previous) ? state.selection : null,
       })
-      persistDiagram(previous)
+      persistDiagrams(putDiagramFirst(state.diagrams, previous))
     },
 
     redo: () => {
@@ -525,13 +641,14 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       if (!next) return
       set({
         diagram: next,
+        diagrams: putDiagramFirst(state.diagrams, next),
         past: [...state.past, state.diagram],
         future: state.future.slice(1),
         canUndo: true,
         canRedo: state.future.length > 1,
         selection: selectionStillExists(state.selection, next) ? state.selection : null,
       })
-      persistDiagram(next)
+      persistDiagrams(putDiagramFirst(state.diagrams, next))
     },
   }
 })

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1200, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Nightingale Schema — tarjeta social</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400&display=swap" rel="stylesheet" />
+    <style>
+      @font-face { font-family: "Host Grotesk"; src: url("/fonts/HostGrotesk-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+      @font-face { font-family: "Host Grotesk"; src: url("/fonts/HostGrotesk-Medium.ttf") format("truetype"); font-weight: 500; font-display: swap; }
+      * { box-sizing: border-box; }
+      html, body { width: 1200px; height: 630px; margin: 0; overflow: hidden; }
+      body { background: #fbf9f4; color: #1c1915; font-family: "Host Grotesk", system-ui, sans-serif; }
+      main { position: relative; width: 1200px; height: 630px; background: #fbf9f4; }
+      .art { position: absolute; inset: 0 0 0 48%; width: 52%; height: 100%; object-fit: cover; object-position: 64% center; }
+      .plate { position: absolute; inset: 0 48% 0 0; z-index: 2; display: flex; flex-direction: column; padding: 62px 58px 50px 70px; border-right: 1px solid #e3dccf; background: #fbf9f4; }
+      .parent { display: flex; align-items: center; gap: 11px; font-size: 18px; font-weight: 500; }
+      .mark { width: 34px; height: 34px; flex: 0 0 auto; background: currentColor; -webkit-mask: url("/brand/nightingale-mark.svg") center / contain no-repeat; mask: url("/brand/nightingale-mark.svg") center / contain no-repeat; }
+      h1 { margin: auto 0 0; font-family: "Newsreader", Georgia, serif; font-optical-sizing: auto; font-size: 74px; font-weight: 400; line-height: .93; letter-spacing: -.035em; }
+      h1 span { color: #9c3b23; }
+      .tagline { max-width: 390px; margin: 26px 0 0; color: #6b6353; font-size: 22px; line-height: 1.3; }
+      .url { margin-top: auto; color: #6b6353; font-size: 16px; }
+      .signal { position: absolute; z-index: 3; right: 47.45%; top: 50%; width: 14px; height: 14px; transform: translate(50%, -50%); border: 3px solid #fbf9f4; border-radius: 999px; background: #9c3b23; }
+    </style>
+  </head>
+  <body>
+    <main aria-label="Nightingale Schema: un lienzo sereno para estructuras de datos">
+      <img class="art" src="/brand-preview/editorial-schema.png" alt="" />
+      <section class="plate">
+        <div class="parent"><span class="mark" aria-hidden="true"></span><span>Nightingale</span></div>
+        <h1>Nightingale<br /><span>Schema</span></h1>
+        <p class="tagline">Un lienzo sereno para estructuras de datos.</p>
+        <p class="url">schema.nightingalelab.org</p>
+      </section>
+      <span class="signal" aria-hidden="true"></span>
+    </main>
+  </body>
+</html>

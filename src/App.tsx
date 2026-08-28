@@ -5,7 +5,6 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
-  MiniMap,
   useReactFlow,
   applyNodeChanges,
   BackgroundVariant,
@@ -17,7 +16,8 @@ import {
 } from '@xyflow/react'
 import {
   Plus, Undo2, Redo2, Maximize, Type, Link2, Pencil,
-  Trash2, Palette, Check, ChevronDown, KeyRound, SquareDashed, Menu,
+  Trash2, Check, ChevronDown, ChevronRight, KeyRound, SquareDashed,
+  FilePlus2, LayoutList, Settings,
 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
@@ -25,14 +25,33 @@ import { DialogScreen } from './components/DialogScreen'
 import { EditorTextInput } from './components/EditorTextInput'
 import { useDiagramStore } from './domain/store'
 import { describeCardinality, parseCardinalityLabel } from './domain/cardinality'
-import type { Cardinality, CustomTheme, Point, SemanticSelection } from './domain/types'
+import type { Cardinality, CustomTheme, Diagram, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
 import { GRID_SIZE } from './domain/layout'
 import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
 import { relationshipHandleSide } from './renderers/chen-stem/handles'
 import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
 
-type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'appearance' | 'menu' | null
+type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'menu' | 'library' | null
+
+const BRAND_MARK_URL = "/brand/nightingale-mark.svg"
+const REACT_FLOW_LABELS = {
+  'controls.ariaLabel': 'Controles del lienzo',
+  'controls.zoomIn.ariaLabel': 'Acercar',
+  'controls.zoomOut.ariaLabel': 'Alejar',
+  'controls.fitView.ariaLabel': 'Ajustar vista',
+  'controls.interactive.ariaLabel': 'Alternar interactividad',
+  'minimap.ariaLabel': 'Minimapa',
+  'handle.ariaLabel': 'Conector',
+}
+
+function NightingaleMark({ className = '' }: { className?: string }) {
+  return <span
+    className={`nightingale-mark ${className}`.trim()}
+    style={{ '--nightingale-mark-url': `url("${BRAND_MARK_URL}")` } as React.CSSProperties}
+    aria-hidden="true"
+  />
+}
 
 // Attributes are disposable renderer output, not layout objects. Keep them
 // out of React Flow's drag interaction while allowing the renderer to own all
@@ -268,8 +287,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
     Boolean(
       semanticIdFromNodeId(connection.source) &&
       semanticIdFromNodeId(connection.target) &&
-      relationshipHandleSide(connection.sourceHandle) &&
-      connection.source !== connection.target
+      relationshipHandleSide(connection.sourceHandle)
     )
   ), [])
 
@@ -314,6 +332,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       nodesConnectable
       deleteKeyCode={[]}
       edgesFocusable={false}
+      ariaLabelConfig={REACT_FLOW_LABELS}
       proOptions={{ hideAttribution: true }}
       selectionOnDrag={false}
       onlyRenderVisibleElements={false}
@@ -325,21 +344,31 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
         size={1}
         color="var(--grid)"
       />
-      <Controls showInteractive={false} className="rf-controls" />
-      <MiniMap pannable zoomable nodeColor="var(--minimap-node)" className="rf-minimap" />
+      <Controls showInteractive={false} showFitView={false} className="rf-controls">
+        <button
+          type="button"
+          className="react-flow__controls-button"
+          onClick={() => rf.fitView({ padding: 0.12, minZoom: 0.25, duration: 420 })}
+          aria-label="Ajustar vista"
+          title="Ajustar vista (F)"
+        >
+          <Maximize size={16} />
+        </button>
+      </Controls>
     </ReactFlow>
-    <button className="fit-button" onClick={() => rf.fitView({ padding: 0.12, minZoom: 0.25, duration: 420 })} aria-label="Ajustar vista" title="Ajustar vista (F)"><Maximize size={16} /> <span>Ajustar</span></button>
   </div>
 }
 
 function EditorApp() {
   const diagram = useDiagramStore((s: any) => s.diagram)
+  const diagrams = useDiagramStore((s: any) => s.diagrams)
   const selection = useDiagramStore((s: any) => s.selection)
   const canUndo = useDiagramStore((s: any) => s.canUndo)
   const canRedo = useDiagramStore((s: any) => s.canRedo)
   const store = useDiagramStore()
   const rf = useReactFlow()
   const [sheet, setSheet] = useState<SheetName>(null)
+  const [selectorOpen, setSelectorOpen] = useState(false)
   const [toast, setToast] = useState('')
   const [draftEntityId, setDraftEntityId] = useState<string>()
   const [draftRelationshipId, setDraftRelationshipId] = useState<string>()
@@ -369,7 +398,21 @@ function EditorApp() {
     setPendingRelationshipRename(undefined)
     setDraftRelationshipId(undefined)
     setSheet(null)
+    setSelectorOpen(false)
   }, [draftEntityId, store])
+
+  const openStoredDiagram = useCallback((id: string) => {
+    if (store.openDiagram(id)) {
+      setSelectorOpen(false)
+      setSheet(null)
+    }
+  }, [store])
+
+  const createNewDiagram = useCallback(() => {
+    store.createDiagram()
+    setSelectorOpen(false)
+    setSheet(null)
+  }, [store])
 
   const finishEntityEdit = useCallback(() => {
     const relationshipId = pendingRelationshipRename
@@ -461,7 +504,8 @@ function EditorApp() {
       const target = event.target instanceof HTMLElement ? event.target : undefined
       if (event.key === 'Escape') {
         event.preventDefault()
-        if (sheet) closeSheet()
+        if (selectorOpen) setSelectorOpen(false)
+        else if (sheet) closeSheet()
         else store.setSelection(null)
         return
       }
@@ -501,24 +545,51 @@ function EditorApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeSheet, deleteTarget, rf, selection, sheet, startEntityCreation, store])
+  }, [closeSheet, deleteTarget, rf, selection, selectorOpen, sheet, startEntityCreation, store])
 
   useEffect(() => { if (toast) { const t = window.setTimeout(() => setToast(''), 2400); return () => window.clearTimeout(t) } }, [toast])
 
+  useEffect(() => {
+    if (!selectorOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && (target.closest('.diagram-selector') || target.closest('.diagram-title'))) return
+      setSelectorOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [selectorOpen])
+
   const deleteSelected = () => deleteTarget(selection)
 
-  if (!diagram) return <main className="loading">Cargando el lienzo…</main>
+  if (!diagram) return <main className="loading">Cargando Nightingale Schema…</main>
 
-  return <main className={`app-shell theme-${diagram.view.theme}`} style={customStyle(diagram.view.customTheme)}>
+  return <main className={`app-shell theme-${diagram.view.theme}`} style={customStyle(diagram.view.customTheme)} aria-label="Nightingale Schema">
     <header className="topbar">
-      <button className="overlay-button top-menu-button" onClick={() => setSheet('menu')} aria-label="Abrir menú" title="Opciones del diagrama"><Menu size={20} /></button>
-      <button className="diagram-title" onClick={() => setSheet('menu')} title="Opciones del diagrama">{diagram.name || 'Diagrama sin título'} <ChevronDown size={14} /></button>
+      <div className="top-left">
+        <div className="product-lockup" aria-label="Nightingale Schema">
+          <NightingaleMark />
+          <span>Nightingale Schema</span>
+        </div>
+        <span className="topbar-divider" aria-hidden="true" />
+        <button
+          className="diagram-title"
+          onClick={() => { setSheet(null); setSelectorOpen((open) => !open) }}
+          aria-label={`${diagram.name || 'Diagrama sin título'}, cambiar de diagrama`}
+          aria-expanded={selectorOpen}
+          aria-haspopup="listbox"
+          title="Cambiar de diagrama"
+        >
+          {diagram.name || 'Diagrama sin título'} <ChevronDown size={14} />
+        </button>
+      </div>
       <div className="top-actions">
         <button className="icon-button" disabled={!canUndo} onClick={store.undo} aria-label="Deshacer" title="Deshacer (⌘/Ctrl+Z)"><Undo2 size={18} /></button>
         <button className="icon-button" disabled={!canRedo} onClick={store.redo} aria-label="Rehacer" title="Rehacer (⌘/Ctrl+Shift+Z)"><Redo2 size={18} /></button>
-        <button className="icon-button" onClick={() => setSheet('appearance')} aria-label="Apariencia"><Palette size={18} /></button>
+        <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('menu') }} aria-label="Ajustes" title="Ajustes del diagrama"><Settings size={18} /></button>
       </div>
     </header>
+    {selectorOpen && <DiagramSelector currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onSeeMore={() => { setSelectorOpen(false); setSheet('library') }} onCreate={createNewDiagram} />}
     <CanvasViewport diagram={diagram} selection={selection} onSelect={setSelection} onMove={store.setPosition} onEdit={openNodeEdit} actionsFor={actionsFor} onRelationshipGesture={handleRelationshipGesture} />
     {!selection && <button className="fab" onClick={startEntityCreation} aria-label="Crear entidad" title="Crear entidad (E)"><Plus size={27} /><span>Nueva entidad</span></button>}
     {selection && <ContextBar selection={selection} onAction={setSheet} onDelete={deleteSelected} />}
@@ -529,10 +600,70 @@ function EditorApp() {
       {sheet === 'relationship' && <RelationshipFlow selectedEntity={selectedEntity} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} draft={draftRelationshipId === selectedRelationship.id} store={store} onDone={finishRelationshipEdit} />}
       {sheet === 'cardinality' && selectedRelationship && <CardinalityEditor relationship={selectedRelationship} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
-      {sheet === 'appearance' && <AppearanceEditor view={diagram.view} store={store} onDone={() => setSheet(null)} />}
-      {sheet === 'menu' && <DiagramMenu diagram={diagram} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
+      {sheet === 'library' && <DiagramLibrary currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onCreate={createNewDiagram} />}
+      {sheet === 'menu' && <DiagramMenu diagram={diagram} view={diagram.view} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
     </DialogScreen>}
   </main>
+}
+
+function diagramSummary(diagram: Diagram) {
+  const entityLabel = diagram.entities.length === 1 ? 'entidad' : 'entidades'
+  const relationshipLabel = diagram.relationships.length === 1 ? 'relación' : 'relaciones'
+  return `${diagram.entities.length} ${entityLabel} · ${diagram.relationships.length} ${relationshipLabel}`
+}
+
+function DiagramSelector({ currentId, diagrams, onSelect, onSeeMore, onCreate }: {
+  currentId: string
+  diagrams: Diagram[]
+  onSelect: (id: string) => void
+  onSeeMore: () => void
+  onCreate: () => void
+}) {
+  const recent = diagrams.slice(0, 3)
+  return <div className="diagram-selector" role="listbox" aria-label="Diagramas recientes">
+    <div className="selector-heading"><LayoutList size={15} /><span>Diagramas recientes</span></div>
+    <div className="selector-list">
+      {recent.map((item) => <button
+        type="button"
+        className={`selector-diagram${item.id === currentId ? ' is-current' : ''}`}
+        key={item.id}
+        role="option"
+        aria-selected={item.id === currentId}
+        onClick={() => onSelect(item.id)}
+      >
+        <span className="selector-diagram-copy"><strong>{item.name || 'Diagrama sin título'}</strong><small>{diagramSummary(item)}</small></span>
+        {item.id === currentId && <Check size={16} aria-label="Diagrama actual" />}
+      </button>)}
+    </div>
+    <button type="button" className="selector-action selector-see-more" onClick={onSeeMore}><span>Ver todos los diagramas</span><ChevronRight size={17} /></button>
+    <button type="button" className="selector-action selector-create" onClick={onCreate}><FilePlus2 size={17} /><span>Nuevo diagrama</span></button>
+  </div>
+}
+
+function DiagramLibrary({ currentId, diagrams, onSelect, onCreate }: {
+  currentId: string
+  diagrams: Diagram[]
+  onSelect: (id: string) => void
+  onCreate: () => void
+}) {
+  return <div className="library-stack dialog-stack">
+    <p className="library-intro">Elige un diagrama para continuar trabajando en él.</p>
+    <div className="library-list" role="listbox" aria-label="Todos los diagramas">
+      {diagrams.map((item) => <button
+        type="button"
+        className={`library-diagram${item.id === currentId ? ' is-current' : ''}`}
+        key={item.id}
+        role="option"
+        aria-selected={item.id === currentId}
+        onClick={() => onSelect(item.id)}
+      >
+        <span className="library-diagram-mark" aria-hidden="true"><LayoutList size={17} /></span>
+        <span className="library-diagram-copy"><strong>{item.name || 'Diagrama sin título'}</strong><small>{diagramSummary(item)}</small></span>
+        {item.id === currentId ? <Check size={17} aria-label="Diagrama actual" /> : <ChevronRight size={17} />}
+      </button>)}
+    </div>
+    <button type="button" className="library-create primary-button" onClick={onCreate}><FilePlus2 size={17} />Nuevo diagrama</button>
+  </div>
 }
 
 function ContextBar({ selection, onAction, onDelete }: { selection: NonNullable<SemanticSelection>; onAction: (s: SheetName) => void; onDelete: () => void }) {
@@ -572,6 +703,8 @@ function AttributeEditor({ ownerType, owner, onDone, store }: any) {
   return <div className="form-stack dialog-form"><div className="attribute-list">{attrs.length === 0 && <p className="empty-note">Todavía no hay atributos.</p>}{attrs.map((a: any) => <div className="attribute-row" key={a.id}><span className={a.key ? 'key-dot filled' : 'key-dot'} /> <span>{a.name}</span>{a.key && <KeyRound size={13} /> }<button onClick={() => { setEditing(a); setName(a.name); setKey(a.key) }} aria-label={`Editar ${a.name}`}><Pencil size={14} /></button><button onClick={() => store.deleteAttribute(ownerType, owner.id, a.id)} aria-label={`Eliminar ${a.name}`}><Trash2 size={14} /></button></div>)}</div><form onSubmit={save} className="attribute-add dialog-attribute-form"><label>{editing ? 'Editar atributo' : 'Nuevo atributo'}<EditorTextInput ref={nameInputRef} autoFocus={!editing} value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. nombre" /></label><label className="check-label"><input type="checkbox" checked={key} onChange={e => setKey(e.target.checked)} /> <span className="key-dot filled" /> Es atributo clave</label><div className="form-actions"><button type="button" className="secondary-button" onClick={() => { if (editing) { setEditing(null); setName(''); setKey(false) } else onDone() }}>{editing ? 'Cancelar' : 'Cerrar'}</button><button className="primary-button" disabled={!name.trim()}>{editing ? 'Guardar' : 'Añadir'}</button></div></form></div>
 }
 
+const RECURSIVE_TARGET = '__recursive__'
+
 function RelationshipFlow({ selectedEntity, entities, store, onDone }: any) {
   const [target, setTarget] = useState<string>('new')
   const [targetName, setTargetName] = useState('')
@@ -579,12 +712,24 @@ function RelationshipFlow({ selectedEntity, entities, store, onDone }: any) {
   const [from, setFrom] = useState<Cardinality>({ min: 0, max: 'n' })
   const [to, setTo] = useState<Cardinality>({ min: 0, max: 'n' })
   const otherEntities = entities.filter((entity: any) => entity.id !== selectedEntity?.id)
+  const targetEntity = entities.find((entity: any) => entity.id === target)
+  const targetEntityName = target === 'new'
+    ? (targetName || 'Nueva entidad')
+    : target === RECURSIVE_TARGET
+      ? selectedEntity?.name ?? 'Esta entidad'
+      : targetEntity?.name ?? 'Entidad destino'
+  const targetLabel = target === RECURSIVE_TARGET ? `${targetEntityName} · rol 2` : targetEntityName
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedEntity || !name.trim()) return
+    const relationshipTarget = target === 'new'
+      ? { name: targetName.trim() || undefined }
+      : target === RECURSIVE_TARGET
+        ? selectedEntity.id
+        : target
     const result = store.createRelationshipFlow(
       selectedEntity.id,
-      target === 'new' ? { name: targetName.trim() || undefined } : target,
+      relationshipTarget,
       name.trim(),
       { cardinalities: [from, to] },
     )
@@ -592,7 +737,48 @@ function RelationshipFlow({ selectedEntity, entities, store, onDone }: any) {
     store.setSelection({ type: 'relationship', id: result.relationshipId })
     onDone()
   }
-  return <form className="form-stack dialog-form" onSubmit={submit}><p className="flow-intro">Relacionar <strong>{selectedEntity?.name}</strong> con…</p><div className="target-options"><label className="radio-card"><input type="radio" checked={target === 'new'} onChange={() => setTarget('new')} /> <span>Crear nueva entidad</span></label><label className={`radio-card${otherEntities.length ? '' : ' is-disabled'}`}><input type="radio" disabled={!otherEntities.length} checked={target !== 'new'} onChange={e => { if (e.target.checked) setTarget(otherEntities[0]?.id ?? 'new') }} /> <span>Entidad existente</span></label></div>{target === 'new' ? <label>Nombre de la entidad<EditorTextInput autoFocus value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="p. ej. CURSO" /></label> : <label>Entidad destino<select value={target} onChange={e => setTarget(e.target.value)}>{otherEntities.map((entity: any) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}</select></label>}<label>Nombre de la relación<EditorTextInput value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. INSCRIBE" /></label><div className="cardinality-grid"><CardinalitySelect label={selectedEntity?.name ?? 'Origen'} value={from} onChange={setFrom} /><CardinalitySelect label={target === 'new' ? (targetName || 'Nueva entidad') : otherEntities.find((entity: any) => entity.id === target)?.name} value={to} onChange={setTo} /></div><div className="cardinality-explanations"><CardinalityExplanation entityName={selectedEntity?.name ?? 'Origen'} relationshipName={name || 'esta relación'} value={from} /><CardinalityExplanation entityName={target === 'new' ? (targetName || 'Nueva entidad') : otherEntities.find((entity: any) => entity.id === target)?.name ?? 'Entidad destino'} relationshipName={name || 'esta relación'} value={to} /></div><button className="primary-button dialog-submit" disabled={!name.trim() || (target === 'new' && !targetName.trim())}><Link2 size={17} />Crear relación</button></form>
+  return <form className="form-stack dialog-form" onSubmit={submit}>
+    <p className="flow-intro">Relacionar <strong>{selectedEntity?.name}</strong> con…</p>
+    <div className="target-options">
+      <label className="radio-card">
+        <input type="radio" checked={target === 'new'} onChange={() => setTarget('new')} />
+        <span>Crear nueva entidad</span>
+      </label>
+      <label className={`radio-card${otherEntities.length ? '' : ' is-disabled'}`}>
+        <input
+          type="radio"
+          disabled={!otherEntities.length}
+          checked={target !== 'new' && target !== RECURSIVE_TARGET}
+          onChange={(e) => { if (e.target.checked) setTarget(otherEntities[0]?.id ?? 'new') }}
+        />
+        <span>Entidad existente</span>
+      </label>
+      <label className={`radio-card${selectedEntity ? '' : ' is-disabled'}`}>
+        <input
+          type="radio"
+          disabled={!selectedEntity}
+          checked={target === RECURSIVE_TARGET}
+          onChange={(e) => { if (e.target.checked) setTarget(RECURSIVE_TARGET) }}
+        />
+        <span>Recursiva</span>
+      </label>
+    </div>
+    {target === 'new'
+      ? <label>Nombre de la entidad<EditorTextInput autoFocus value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="p. ej. CURSO" /></label>
+      : target === RECURSIVE_TARGET
+        ? <p className="empty-note">La relación conectará <strong>{selectedEntity?.name}</strong> consigo misma.</p>
+        : <label>Entidad destino<select value={target} onChange={e => setTarget(e.target.value)}>{otherEntities.map((entity: any) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}</select></label>}
+    <label>Nombre de la relación<EditorTextInput value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. INSCRIBE" /></label>
+    <div className="cardinality-grid">
+      <CardinalitySelect label={selectedEntity?.name ?? 'Origen'} value={from} onChange={setFrom} />
+      <CardinalitySelect label={targetLabel} value={to} onChange={setTo} />
+    </div>
+    <div className="cardinality-explanations">
+      <CardinalityExplanation entityName={selectedEntity?.name ?? 'Origen'} relationshipName={name || 'esta relación'} value={from} />
+      <CardinalityExplanation entityName={targetEntityName} relationshipName={name || 'esta relación'} value={to} />
+    </div>
+    <button className="primary-button dialog-submit" disabled={!name.trim() || (target === 'new' && !targetName.trim())}><Link2 size={17} />Crear relación</button>
+  </form>
 }
 
 function CardinalitySelect({ label, value, onChange }: { label?: string; value: Cardinality; onChange: (c: Cardinality) => void }) {
@@ -612,12 +798,17 @@ function RelationshipEditor({ relationship, draft, store, onDone }: any) {
 
 function CardinalityEditor({ relationship, entities, store, onDone }: any) {
   const [parts, setParts] = useState(relationship.participants.map((p: any) => ({ ...p.cardinality })))
-  const save = (e: React.FormEvent) => { e.preventDefault(); relationship.participants.forEach((p: any, i: number) => store.updateParticipant(relationship.id, p.entityId, parts[i])); onDone() }
+  const participantCounts = relationship.participants.reduce((counts: Record<string, number>, participant: any) => {
+    counts[participant.entityId] = (counts[participant.entityId] ?? 0) + 1
+    return counts
+  }, {})
+  const save = (e: React.FormEvent) => { e.preventDefault(); relationship.participants.forEach((p: any, i: number) => store.updateParticipant(relationship.id, p.entityId, parts[i], i)); onDone() }
   return <form className="form-stack dialog-form" onSubmit={save}>
     {relationship.participants.map((p: any, i: number) => {
       const entityName = entities.find((e: any) => e.id === p.entityId)?.name ?? 'esta entidad'
-      return <div className="cardinality-option" key={p.entityId}>
-        <CardinalitySelect label={entityName} value={parts[i]} onChange={c => setParts((old: any[]) => old.map((v, n) => n === i ? c : v))} />
+      const label = (participantCounts[p.entityId] ?? 0) > 1 ? `${entityName} · rol ${i + 1}` : entityName
+      return <div className="cardinality-option" key={`${p.entityId}-${i}`}>
+        <CardinalitySelect label={label} value={parts[i]} onChange={c => setParts((old: any[]) => old.map((v, n) => n === i ? c : v))} />
         <CardinalityExplanation entityName={entityName} relationshipName={relationship.name || 'esta relación'} value={parts[i]} />
       </div>
     })}
@@ -626,21 +817,21 @@ function CardinalityEditor({ relationship, entities, store, onDone }: any) {
 }
 
 function AppearanceEditor({ view, store, onDone }: any) {
-  const [custom, setCustom] = useState<CustomTheme>(view.customTheme ?? { background: '#f7f5ef', entity: '#fffdf8', relationship: '#f0ebe1', ink: '#26231f', font: 'serif' })
+  const [custom, setCustom] = useState<CustomTheme>(view.customTheme ?? { background: '#fbf9f4', entity: '#ffffff', relationship: '#f6e3da', ink: '#1c1915', font: 'serif' })
   const layoutMode = view.layoutMode ?? 'structured'
   return <div className="appearance-stack dialog-stack"><p className="section-kicker">Estilo del diagrama</p><div className="theme-grid">{([['academic', 'Académico', 'paper'], ['warm', 'Cálido', 'warm'], ['modern', 'Moderno', 'modern']] as const).map(([id, label, klass]) => <button type="button" className={`theme-card ${view.theme === id ? 'selected' : ''}`} key={id} onClick={() => store.setTheme(id)}><span className={`theme-preview ${klass}`}><b /><i /></span><span>{label}</span></button>)}</div><div className="layout-mode-section"><p className="section-kicker">Distribución</p><div className="segmented layout-mode-toggle" role="group" aria-label="Modo de distribución del diagrama"><button type="button" className={layoutMode === 'structured' ? 'active' : ''} aria-pressed={layoutMode === 'structured'} onClick={() => store.setLayoutMode('structured')}>Estructurado</button><button type="button" className={layoutMode === 'freeform' ? 'active' : ''} aria-pressed={layoutMode === 'freeform'} onClick={() => store.setLayoutMode('freeform')}>Libre</button></div><p className="layout-mode-help">Estructurado ajusta entidades y relaciones a una cuadrícula de 24 px.</p></div><div className="custom-toggle"><span>Colores personalizados</span><small>Opcional</small></div><div className="color-fields">{([['background', 'Fondo'], ['entity', 'Entidad'], ['relationship', 'Relación'], ['ink', 'Tinta']] as const).map(([key, label]) => <label key={key}>{label}<input type="color" value={custom[key]} onChange={e => { const next = { ...custom, [key]: e.target.value }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }} /></label>)}</div><label className="font-select">Tipografía<select value={custom.font} onChange={e => { const font = e.target.value as 'serif' | 'sans'; const next = { ...custom, font }; setCustom(next); store.setTheme('custom'); store.updateCustomTheme(next) }}><option value="serif">Serif académica</option><option value="sans">Sans moderna</option></select></label><button type="button" className="secondary-button full-button dialog-submit" onClick={onDone}>Listo</button></div>
 }
 
-function DiagramMenu({ diagram, store, onClose, onToast }: any) {
+function DiagramMenu({ diagram, view, store, onClose, onToast }: any) {
   const [name, setName] = useState(diagram.name)
   const rename = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) store.setDiagramName(name.trim()); onClose() }
   const reset = (mode: 'blank' | 'sample') => { if (window.confirm(mode === 'blank' ? '¿Crear un diagrama vacío? Se reemplazará el contenido actual.' : '¿Restaurar el diagrama de ejemplo?')) { store.resetDiagram(mode); onClose(); onToast('Diagrama actualizado') } }
-  return <div className="menu-stack dialog-stack"><form onSubmit={rename} className="form-stack dialog-form"><label>Nombre del diagrama<EditorTextInput autoFocus value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="shortcut-list" aria-label="Atajos de teclado"><p className="section-kicker">Atajos de teclado</p><div><kbd>E</kbd><span>Nueva entidad</span><kbd>A</kbd><span>Atributo</span></div><div><kbd>R</kbd><span>Relación</span><kbd>Enter</kbd><span>Renombrar</span></div><div><kbd>F</kbd><span>Ajustar vista</span><kbd>⌘/Ctrl Z</kbd><span>Deshacer</span></div></div><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button></div>
+  return <div className="menu-stack dialog-stack"><form onSubmit={rename} className="form-stack dialog-form"><label>Nombre del diagrama<EditorTextInput value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="shortcut-list" aria-label="Atajos de teclado"><p className="section-kicker">Atajos de teclado</p><div><kbd>E</kbd><span>Nueva entidad</span><kbd>A</kbd><span>Atributo</span></div><div><kbd>R</kbd><span>Relación</span><kbd>Enter</kbd><span>Renombrar</span></div><div><kbd>F</kbd><span>Ajustar vista</span><kbd>⌘/Ctrl Z</kbd><span>Deshacer</span></div></div><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button><div className="menu-divider" /><AppearanceEditor view={view} store={store} onDone={onClose} /></div>
 }
 
 function customStyle(theme?: CustomTheme): React.CSSProperties | undefined {
   if (!theme) return undefined
-  return { '--custom-bg': theme.background, '--custom-entity': theme.entity, '--custom-relationship': theme.relationship, '--custom-ink': theme.ink, '--custom-font': theme.font === 'serif' ? 'Georgia, serif' : 'Inter, system-ui, sans-serif' } as React.CSSProperties
+  return { '--custom-bg': theme.background, '--custom-entity': theme.entity, '--custom-relationship': theme.relationship, '--custom-ink': theme.ink, '--custom-font': theme.font === 'serif' ? 'Newsreader, Georgia, serif' : 'Host Grotesk, system-ui, sans-serif' } as React.CSSProperties
 }
 
 function sheetTitle(sheet: SheetName, entity: any, relationship: any) {
@@ -649,8 +840,7 @@ function sheetTitle(sheet: SheetName, entity: any, relationship: any) {
   if (sheet === 'relationship') return 'Nueva relación'
   if (sheet === 'relationshipEdit') return 'Editar relación'
   if (sheet === 'cardinality') return 'Cardinalidades'
-  if (sheet === 'appearance') return 'Apariencia'
-  return 'Opciones del diagrama'
+  return 'Ajustes del diagrama'
 }
 
 export default function App() { return <ReactFlowProvider><EditorApp /></ReactFlowProvider> }

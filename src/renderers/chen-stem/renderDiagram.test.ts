@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, Diagram } from '../../domain/types'
 import { createSampleDiagram } from '../../domain/sample'
-import { cardinalityLabelPosition, orthogonalRoute } from './ConnectorEdge'
+import { cardinalityLabelPosition, offsetConnectionPoint, orthogonalRoute } from './ConnectorEdge'
 import { connectionHandleBox, STATIC_HANDLE_SIDES, positionForSide, staticHandleId } from './handles'
 import {
   ATTRIBUTE_SIZE,
@@ -296,6 +296,37 @@ describe('renderDiagram / Chen-stem', () => {
       .every((edge) => edge.data?.cardinalityPending === true)).toBe(true)
   })
 
+  it('projects recursive participants as two distinct grid-aligned connector lanes', () => {
+    const diagram = baseDiagram({
+      entities: [entity('professor')],
+      relationships: [{
+        id: 'teaches', name: 'IMPARTE',
+        participants: [
+          { entityId: 'professor', cardinality: { min: 1, max: 1 } },
+          { entityId: 'professor', cardinality: { min: 0, max: 'n' } },
+        ],
+        attributes: [],
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: { professor: { x: 0, y: 0 }, teaches: { x: 240, y: 0 } },
+      },
+    })
+    const edges = renderDiagram(diagram).edges.filter((edge) => edge.id.startsWith('participant-edge:'))
+    expect(edges).toHaveLength(2)
+    expect(edges.map((edge) => edge.data?.recursiveOffset)).toEqual([-24, 24])
+    expect(new Set(edges.map((edge) => edge.sourceHandle))).toEqual(new Set(['source-east']))
+    expect(new Set(edges.map((edge) => edge.targetHandle))).toEqual(new Set(['target-west']))
+
+    const source = edges.map((edge) => offsetConnectionPoint({ x: 192, y: 48 }, Position.Right, edge.data?.recursiveOffset as number, 'source'))
+    const target = edges.map((edge) => offsetConnectionPoint({ x: 240, y: 48 }, Position.Left, edge.data?.recursiveOffset as number, 'target'))
+    expect(source).toEqual([{ x: 192, y: 24 }, { x: 192, y: 72 }])
+    expect(target).toEqual([{ x: 264, y: 24 }, { x: 264, y: 72 }])
+    expect(orthogonalRoute(source[0], target[0], Position.Right, Position.Left)).toEqual([
+      { x: 192, y: 24 }, { x: 264, y: 24 },
+    ])
+  })
+
   it('keeps the dense five-entity fixture aligned, attached, and non-draggable', () => {
     const diagram = denseFixture()
     const result = renderDiagram(diagram)
@@ -412,9 +443,9 @@ describe('renderDiagram / Chen-stem', () => {
       expect(point.x === previous.x || point.y === previous.y).toBe(true)
     }))
     expect(routes[0]).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }])
-    expect(cardinalityLabelPosition(routes[0])).toEqual({ x: 28, y: -9 })
+    expect(cardinalityLabelPosition(routes[0])).toEqual({ x: 28, y: -12 })
     expect(cardinalityLabelPosition(orthogonalRoute(
       { x: 0, y: 0 }, { x: 100, y: 80 }, Position.Bottom, Position.Left,
-    ))).toEqual({ x: 9, y: 28 })
+    ))).toEqual({ x: 12, y: 40 })
   })
 })

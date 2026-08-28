@@ -110,10 +110,10 @@
 
 .chen-node.is-selected .chen-entity-node,
 .chen-entity-node.is-selected {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--entity-stroke, #25231f) 17%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #9c3b23) 32%, transparent);
 }
-.chen-relationship-node.is-selected .chen-relationship-node__diamond {
-  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--relationship-stroke, #25231f) 40%, transparent));
+.chen-relationship-node.is-selected .chen-relationship-node__diamond polygon {
+  stroke-width: calc(var(--stroke-width, 1.35px) + 1px);
 }
 .chen-attribute-node.is-selected { background: color-mix(in srgb, var(--entity-fill, #fbfaf6) 85%, var(--ink, #25231f)); }
 
@@ -122,10 +122,10 @@
   display: flex;
   gap: 3px;
   padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--ink, #25231f) 14%, transparent);
-  border-radius: 9px;
-  background: var(--panel, #fffdf8);
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--ink, #25231f) 16%, transparent);
+  border: 1px solid var(--ui-border, #e3dccf);
+  border-radius: 4px;
+  background: var(--ui-raised, #fff);
+  box-shadow: var(--ui-shadow, 0 1px 2px rgb(28 25 21 / .06));
   white-space: nowrap;
 }
 .chen-node-toolbar button {
@@ -134,25 +134,25 @@
   gap: 5px;
   min-height: 30px;
   padding: 5px 8px;
-  border-radius: 6px;
-  color: var(--ink, #25231f);
+  border-radius: 4px;
+  color: var(--ui-text, #1c1915);
   background: transparent;
-  font: 11px/1 system-ui, sans-serif;
+  font: 500 11px/1 var(--ui-font, system-ui, sans-serif);
 }
 .chen-node-toolbar button:hover,
-.chen-node-toolbar button:focus-visible { background: color-mix(in srgb, var(--accent, #6b5540) 12%, transparent); }
-.chen-node-toolbar button.is-danger { color: #a14f48; }
+.chen-node-toolbar button:focus-visible { background: var(--ui-accent-wash, #f6e3da); }
+.chen-node-toolbar button.is-danger { color: #8f2323; }
 .chen-hover-actions {
   z-index: 30;
   display: flex;
   gap: 4px;
   padding: 5px;
-  border: 1px solid color-mix(in srgb, var(--ink, #25231f) 12%, transparent);
-  border-radius: 9px;
-  background: var(--panel, #fffdf8);
-  box-shadow: 0 5px 16px color-mix(in srgb, var(--ink, #25231f) 18%, transparent);
+  border: 1px solid var(--ui-border, #e3dccf);
+  border-radius: 4px;
+  background: var(--ui-raised, #fff);
+  box-shadow: var(--ui-shadow, 0 1px 2px rgb(28 25 21 / .06));
   pointer-events: all;
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition: opacity 120ms cubic-bezier(.2, 0, 0, 1), transform 120ms cubic-bezier(.2, 0, 0, 1);
 }
 .chen-hover-actions button {
   display: grid;
@@ -160,12 +160,12 @@
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 5px;
-  color: var(--ink, #25231f);
+  border-radius: 4px;
+  color: var(--ui-text, #1c1915);
   background: transparent;
 }
 .chen-hover-actions button:hover,
-.chen-hover-actions button:focus-visible { background: color-mix(in srgb, var(--accent, #6b5540) 12%, transparent); }
+.chen-hover-actions button:focus-visible { background: var(--ui-accent-wash, #f6e3da); }
 
 .chen-connector-edge { stroke: var(--ink, #25231f); stroke-width: var(--stroke-width, 1.35px); fill: none; }
 .chen-connector-edge.is-selected { stroke-width: 2px; }
@@ -244,10 +244,10 @@
 }
 .chen-relationship-handle > span {
   display: block;
-  border: 1.5px solid var(--accent, #6b5540);
+  border: 1.5px solid var(--accent, #9c3b23);
   border-radius: 50%;
   background: var(--canvas, #fbfaf6);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--ink, #25231f) 20%, transparent);
+  box-shadow: none;
 }
 .chen-node.is-selected .chen-relationship-handle {
   opacity: 1;

@@ -294,6 +294,7 @@ export const patchParticipant = (
   relationshipId: string,
   entityId: string,
   cardinality: Cardinality,
+  participantIndex?: number,
 ): Diagram => {
   const index = relationshipIndex(diagram, relationshipId)
   if (index < 0) return diagram
@@ -301,8 +302,10 @@ export const patchParticipant = (
   delete pendingCardinalities[relationshipId]
   const next = updateRelationshipAt(diagram, index, (relationship) => ({
         ...relationship,
-        participants: relationship.participants.map((participant) =>
-          participant.entityId === entityId ? { ...participant, cardinality } : participant,
+        participants: relationship.participants.map((participant, index) =>
+          (participantIndex === index || (participantIndex === undefined && participant.entityId === entityId))
+            ? { ...participant, cardinality }
+            : participant,
         ),
       }))
   return {

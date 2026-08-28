@@ -246,6 +246,33 @@ describe('modelo semántico del diagrama', () => {
     expect(state().diagram.view.pendingCardinalities?.[relationship.id]).toBeUndefined()
   })
 
+  it('creates a recursive relationship with two independently editable roles', () => {
+    const professorId = state().createEntity('PROFESOR', 'strong', { x: 0, y: 0 })
+    const result = state().createRelationshipFlow(professorId, professorId, 'IMPARTE', {
+      sourceSide: 'east',
+      cardinalities: [
+        { min: 1, max: 1 },
+        { min: 0, max: 'n' },
+      ],
+    })
+
+    expect(result?.entityId).toBe(professorId)
+    expect(state().diagram.relationships).toHaveLength(1)
+    const relationship = state().diagram.relationships[0]
+    expect(relationship.participants.map(({ entityId }) => entityId)).toEqual([professorId, professorId])
+    expect(relationship.participants.map(({ cardinality }) => cardinality)).toEqual([
+      { min: 1, max: 1 },
+      { min: 0, max: 'n' },
+    ])
+    expect(state().diagram.view.positions[relationship.id]).toEqual({ x: 240, y: 0 })
+
+    state().updateParticipant(relationship.id, professorId, { min: 0, max: 1 }, 0)
+    expect(state().diagram.relationships[0].participants.map(({ cardinality }) => cardinality)).toEqual([
+      { min: 0, max: 1 },
+      { min: 0, max: 'n' },
+    ])
+  })
+
   it('creates a new target entity and relationship as one undoable operation', () => {
     const sourceId = state().createEntity('SOURCE', 'strong', { x: 0, y: 0 })
     const result = state().createRelationshipFlow(sourceId, {

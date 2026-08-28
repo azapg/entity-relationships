@@ -406,6 +406,11 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
 
   const byId = new Map(diagram.entities.map((entity) => [entity.id, entity]))
   diagram.relationships.forEach((relationship) => {
+    const participantCounts = new Map<string, number>()
+    relationship.participants.forEach((participant) => {
+      participantCounts.set(participant.entityId, (participantCounts.get(participant.entityId) ?? 0) + 1)
+    })
+    const participantOccurrences = new Map<string, number>()
     relationship.participants.forEach((participant, index) => {
       if (!byId.has(participant.entityId)) return
       const entityPosition = entityPositions.get(participant.entityId)!
@@ -414,6 +419,12 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
         center(entityPosition, entityWidths.get(participant.entityId)!, ENTITY_SIZE.height),
         center(relationshipPosition, RELATION_SIZE.width, RELATION_SIZE.height),
       )
+      const occurrence = participantOccurrences.get(participant.entityId) ?? 0
+      participantOccurrences.set(participant.entityId, occurrence + 1)
+      const count = participantCounts.get(participant.entityId) ?? 1
+      const recursiveOffset = count > 1
+        ? (occurrence - (count - 1) / 2) * (count === 2 ? GRID_SIZE * 2 : GRID_SIZE)
+        : undefined
       edges.push({
         id: `participant-edge:${relationship.id}:${participant.entityId}:${index}`,
         type: 'connector', source: nodeId('entity', participant.entityId), target: nodeId('relationship', relationship.id),
@@ -423,6 +434,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
           relationshipId: relationship.id,
           cardinality: participant.cardinality,
           cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
+          recursiveOffset,
           selected: selectedFor(selectedId, relationship.id),
         },
       })

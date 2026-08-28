@@ -13,7 +13,9 @@ const styleForHandle = (handle: AttributeHandleLayout): React.CSSProperties => (
   top: handle.y,
 })
 
-const RELATIONSHIP_LABEL_INSET = 0.74
+// The horizontal diagonal is the diamond's longest usable axis. Keep a small
+// margin for the stroke while letting long labels shrink into that space.
+const RELATIONSHIP_LABEL_INSET = 0.84
 
 export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeType>) {
   const { zoom } = useViewport()
@@ -68,7 +70,7 @@ export function RelationshipNode({ data, selected }: NodeProps<RelationshipNodeT
       <span
         ref={labelRef}
         className="chen-relationship-node__label"
-        style={{ transform: `rotate(-45deg) scale(${labelScale})` }}
+        style={{ transform: `scale(${labelScale})` }}
       >{label}</span>
       <Handle className="chen-hidden-handle" type="source" position={positionForSide('north')} id={staticHandleId('source', 'north')} style={{ left: width / 2, top: DIAMOND_INSET }} />
       <Handle className="chen-hidden-handle" type="source" position={positionForSide('east')} id={staticHandleId('source', 'east')} style={{ left: width - DIAMOND_INSET, top: height / 2 }} />

@@ -1,6 +1,6 @@
-# Lienzo ER
+# Nightingale Schema
 
-Prototipo móvil de un editor conceptual de diagramas entidad–relación con notación académica tipo Chen. El diagrama semántico es la fuente de verdad; React Flow solo representa su proyección visual.
+Editor conceptual de diagramas entidad–relación de Nightingale, con notación académica tipo Chen. El diagrama semántico es la fuente de verdad; React Flow solo representa su proyección visual.
 
 La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, temas, persistencia local y undo/redo.
 
@@ -21,6 +21,8 @@ bun run dev
 ```
 
 También funciona con `npm install` y `npm run dev`.
+
+La aplicación de producción vive en [schema.nightingalelab.org](https://schema.nightingalelab.org/).
 
 ## Verificación
 

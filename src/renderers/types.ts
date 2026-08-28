@@ -40,6 +40,7 @@ export type DiagramNodeData = Record<string, unknown> & {
   height?: number
   hovered?: boolean
   cardinalityPending?: boolean
+  recursiveOffset?: number
   actions?: NodeActionHandlers
 }
 
