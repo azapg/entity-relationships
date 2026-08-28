@@ -126,4 +126,74 @@ describe('modelo semántico del diagrama', () => {
     state().undo()
     expect(state().diagram.entities[0].name).toBe('STUDENT')
   })
+
+  it('normaliza diagramas antiguos sin tocar posiciones ni contenido personalizado', () => {
+    const storage = memoryStorage()
+    const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
+
+    try {
+      const legacy = createSampleDiagram() as unknown as Record<string, unknown>
+      const view = { ...(legacy.view as Record<string, unknown>) }
+      delete view.layoutMode
+      delete view.attributeLayout
+      view.positions = {
+        'sample-student': { x: 11, y: 37 },
+        'sample-course': { x: 88, y: 119 },
+      }
+      legacy.view = view
+      storage.setItem(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, diagram: legacy }))
+
+      const loaded = readPersistedDiagram()!
+      expect(loaded.view.layoutMode).toBe('structured')
+      expect(loaded.view.positions['sample-student']).toEqual({ x: 11, y: 37 })
+      expect(loaded.view.attributeLayout['sample-student-id'].side).toMatch(/north|east|south|west/)
+      const persisted = JSON.parse(storage.getItem(STORAGE_KEY)!)
+      expect(persisted.diagram.view.layoutMode).toBe('structured')
+      expect(persisted.diagram.view.attributeLayout['sample-course-title']).toBeTruthy()
+    } finally {
+      if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage)
+      else Reflect.deleteProperty(globalThis, 'localStorage')
+    }
+  })
+
+  it('assigns stable sides on add/edit and prunes them on delete', () => {
+    const entityId = state().createEntity('ACCOUNT')
+    const first = state().addAttribute('entity', entityId, 'id', true)
+    const second = state().addAttribute('entity', entityId, 'email')
+    const before = state().diagram.view.attributeLayout
+    expect(before[first]).toBeTruthy()
+    expect(before[second]).toBeTruthy()
+
+    state().updateAttribute('entity', entityId, first, { name: 'account_id', key: false })
+    expect(state().diagram.view.attributeLayout[first]).toEqual(before[first])
+    state().deleteAttribute('entity', entityId, first)
+    expect(state().diagram.view.attributeLayout[first]).toBeUndefined()
+    expect(state().diagram.view.attributeLayout[second]).toEqual(before[second])
+  })
+
+  it('switches modes atomically, snaps only when entering structured, and undoes the switch', () => {
+    const entityId = state().createEntity('ACCOUNT', 'strong', { x: 101, y: 131 })
+    expect(state().diagram.view.positions[entityId]).toEqual({ x: 96, y: 120 })
+    state().setLayoutMode('freeform')
+    state().setPosition(entityId, { x: 101, y: 131 })
+    expect(state().diagram.view.positions[entityId]).toEqual({ x: 101, y: 131 })
+    state().setLayoutMode('structured')
+    expect(state().diagram.view.positions[entityId]).toEqual({ x: 96, y: 120 })
+    state().undo()
+    expect(state().diagram.view.layoutMode).toBe('freeform')
+    expect(state().diagram.view.positions[entityId]).toEqual({ x: 101, y: 131 })
+  })
+
+  it('reflows all owners deterministically while preserving semantic content', () => {
+    const entityId = state().createEntity('ACCOUNT')
+    const one = state().addAttribute('entity', entityId, 'one')
+    const two = state().addAttribute('entity', entityId, 'two')
+    const original = state().diagram.entities.find((entity) => entity.id === entityId)!
+    state().reflowAttributes()
+    const layout = state().diagram.view.attributeLayout
+    expect(layout[one]).toEqual({ side: 'north' })
+    expect(layout[two]).toEqual({ side: 'east' })
+    expect(state().diagram.entities.find((entity) => entity.id === entityId)).toEqual(original)
+  })
 })

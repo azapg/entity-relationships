@@ -1,5 +1,9 @@
 export type Point = { x: number; y: number }
 
+export type LayoutMode = 'structured' | 'freeform'
+
+export type AttributeSide = 'north' | 'east' | 'south' | 'west'
+
 export type Cardinality = {
   min: 0 | 1
   max: 1 | 'n'
@@ -42,6 +46,8 @@ export type DiagramView = {
   renderer: 'chen-stem'
   theme: 'academic' | 'warm' | 'modern' | 'custom'
   positions: Record<string, Point>
+  layoutMode: LayoutMode
+  attributeLayout: Record<string, { side: AttributeSide }>
   customTheme?: CustomTheme
 }
 

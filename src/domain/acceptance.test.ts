@@ -69,7 +69,7 @@ describe('flujo de aceptación semántico', () => {
 
     const instructor = state().diagram.entities.find((entity) => entity.id === professorId)
     expect(instructor?.name).toBe('INSTRUCTOR')
-    expect(state().diagram.view.positions[professorId]).toEqual({ x: 512, y: 288 })
+    expect(state().diagram.view.positions[professorId]).toEqual({ x: 504, y: 288 })
     expect(state().diagram.view.theme).toBe('warm')
     expect(state().diagram.relationships.find((relationship) => relationship.id === teachesId)?.attributes).toEqual([
       { id: semesterId, name: 'semester', key: false },

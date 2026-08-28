@@ -16,9 +16,12 @@ import {
   setDiagramName as setDiagramNameCommand,
   setDiagramTheme,
   setEntityKind as setEntityKindCommand,
+  setLayoutMode as setLayoutModeCommand,
+  reflowAttributes as reflowAttributesCommand,
   type AttributeOwner,
   type AttributePatch,
 } from './commands'
+import { ensureAttributeLayout, normalizeLayoutMode } from './layout'
 import { createBlankDiagram, createSampleDiagram } from './sample'
 import type {
   Attribute,
@@ -30,6 +33,7 @@ import type {
   Point,
   Relationship,
   SemanticSelection,
+  LayoutMode,
 } from './types'
 
 export const STORAGE_KEY = 'er-diagram:v1'
@@ -86,6 +90,8 @@ export type DiagramStore = {
   ) => void
   deleteRelationship: (id: string) => void
   setPosition: (id: string, point: Point) => void
+  setLayoutMode: (mode: LayoutMode) => void
+  reflowAttributes: () => void
   setTheme: (theme: Diagram['view']['theme']) => void
   updateCustomTheme: (patch: Partial<CustomTheme>) => void
   resetDiagram: (mode?: 'blank' | 'sample') => void
@@ -162,6 +168,42 @@ const migrateLegacySample = (diagram: Diagram): boolean => {
   return migrated
 }
 
+/** Add view-only fields to diagrams written by older versions. */
+export const normalizeDiagram = (diagram: Diagram): Diagram => {
+  const legacyView = diagram.view as Diagram['view'] & {
+    layoutMode?: unknown
+    attributeLayout?: unknown
+  }
+  const attributeLayout = legacyView.attributeLayout && typeof legacyView.attributeLayout === 'object'
+    ? legacyView.attributeLayout as Diagram['view']['attributeLayout']
+    : {}
+  const candidate = {
+    ...diagram,
+    view: {
+      ...diagram.view,
+      layoutMode: normalizeLayoutMode(legacyView.layoutMode),
+      attributeLayout,
+    },
+  }
+  const attributeIds = new Set([
+    ...diagram.entities.flatMap((entity) => entity.attributes.map((attribute) => attribute.id)),
+    ...diagram.relationships.flatMap((relationship) =>
+      relationship.attributes.map((attribute) => attribute.id)),
+  ])
+  return {
+    ...candidate,
+    view: {
+      ...candidate.view,
+      // Migration never moves a user's existing objects. Switching to
+      // Structured explicitly performs the grid snap as one history action.
+      positions: Object.fromEntries(
+        Object.entries(diagram.view.positions).filter(([id]) => !attributeIds.has(id)),
+      ),
+      attributeLayout: ensureAttributeLayout(candidate),
+    },
+  }
+}
+
 export const readPersistedDiagram = (): Diagram | undefined => {
   const storage = getStorage()
   if (!storage) return undefined
@@ -172,8 +214,11 @@ export const readPersistedDiagram = (): Diagram | undefined => {
     if (!parsed || typeof parsed !== 'object') return undefined
     const payload = parsed as Partial<PersistedDiagram>
     if (payload.version !== STORAGE_VERSION || !isDiagram(payload.diagram)) return undefined
-    const diagram = cloneDiagram(payload.diagram)
-    if (migrateLegacySample(diagram)) persistDiagram(diagram)
+    const diagram = normalizeDiagram(cloneDiagram(payload.diagram))
+    // Persist normalization so a legacy payload is upgraded on first read.
+    // This also writes localized built-in sample labels when applicable.
+    migrateLegacySample(diagram)
+    persistDiagram(diagram)
     return diagram
   } catch {
     // A malformed or unavailable localStorage should never prevent the editor
@@ -186,7 +231,10 @@ export const persistDiagram = (diagram: Diagram) => {
   const storage = getStorage()
   if (!storage) return
   try {
-    const payload: PersistedDiagram = { version: STORAGE_VERSION, diagram: cloneDiagram(diagram) }
+    const payload: PersistedDiagram = {
+      version: STORAGE_VERSION,
+      diagram: cloneDiagram(normalizeDiagram(diagram)),
+    }
     storage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // Persistence is a convenience; private browsing and quota errors are safe to ignore.
@@ -219,7 +267,7 @@ const selectionStillExists = (selection: SemanticSelection, diagram: Diagram) =>
     : diagram.relationships.some((relationship) => relationship.id === selection.id)
 }
 
-const initialDiagram = readPersistedDiagram() ?? createSampleDiagram()
+const initialDiagram = normalizeDiagram(readPersistedDiagram() ?? createSampleDiagram())
 
 export const useDiagramStore = create<InternalStore>((set, get) => {
   const commit = (next: Diagram) => {
@@ -341,6 +389,15 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
 
     setPosition: (id, point) => {
       commitWithoutHistory(moveItem(get().diagram, id, { x: point.x, y: point.y }))
+    },
+
+    setLayoutMode: (mode) => {
+      if (mode === get().diagram.view.layoutMode) return
+      commit(setLayoutModeCommand(get().diagram, mode))
+    },
+
+    reflowAttributes: () => {
+      commit(reflowAttributesCommand(get().diagram))
     },
 
     setTheme: (theme) => {

@@ -51,6 +51,14 @@ export const createSampleDiagram = (): Diagram => ({
       [sampleId('enrolls')]: { x: 430, y: 260 },
       [sampleId('course')]: { x: 740, y: 220 },
     },
+    layoutMode: 'structured',
+    attributeLayout: {
+      [sampleId('student-id')]: { side: 'north' },
+      [sampleId('student-name')]: { side: 'south' },
+      [sampleId('course-id')]: { side: 'north' },
+      [sampleId('course-title')]: { side: 'south' },
+      [sampleId('grade')]: { side: 'north' },
+    },
   },
 })
 
@@ -63,5 +71,7 @@ export const createBlankDiagram = (): Diagram => ({
     renderer: 'chen-stem',
     theme: 'academic',
     positions: {},
+    layoutMode: 'structured',
+    attributeLayout: {},
   },
 })

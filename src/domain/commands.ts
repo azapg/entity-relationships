@@ -7,6 +7,12 @@ import type {
   Point,
   Relationship,
 } from './types'
+import {
+  ensureAttributeLayout,
+  reflowAttributeLayout,
+  snapMajorPositions,
+  snapPoint,
+} from './layout'
 
 /**
  * The functions in this file are deliberately UI-agnostic.  A React Flow
@@ -47,6 +53,17 @@ const updateRelationshipAt = (
   ),
 })
 
+const withAttributeLayout = (diagram: Diagram): Diagram => ({
+  ...diagram,
+  view: { ...diagram.view, attributeLayout: ensureAttributeLayout(diagram) },
+})
+
+const withoutAttributeLayout = (diagram: Diagram, attributeId: string): Diagram => {
+  const attributeLayout = { ...diagram.view.attributeLayout }
+  delete attributeLayout[attributeId]
+  return { ...diagram, view: { ...diagram.view, attributeLayout } }
+}
+
 export const setDiagramName = (diagram: Diagram, name: string): Diagram => ({
   ...diagram,
   name: cleanName(name, 'Sin título'),
@@ -61,7 +78,11 @@ export const insertEntity = (
   entities: [...diagram.entities, entity],
   view: {
     ...diagram.view,
-    positions: { ...diagram.view.positions, [entity.id]: position },
+    positions: {
+      ...diagram.view.positions,
+      [entity.id]: diagram.view.layoutMode === 'structured' ? snapPoint(position) : position,
+    },
+    attributeLayout: { ...diagram.view.attributeLayout },
   },
 })
 
@@ -103,8 +124,16 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
   )
 
   const positions = { ...diagram.view.positions }
+  const attributeLayout = { ...diagram.view.attributeLayout }
   delete positions[id]
   removedRelationshipIds.forEach((relationshipId) => delete positions[relationshipId])
+  diagram.entities
+    .find((entity) => entity.id === id)
+    ?.attributes.forEach((attribute) => delete attributeLayout[attribute.id])
+  diagram.relationships
+    .filter((relationship) => removedRelationshipIds.has(relationship.id))
+    .flatMap((relationship) => relationship.attributes)
+    .forEach((attribute) => delete attributeLayout[attribute.id])
 
   return {
     ...diagram,
@@ -112,7 +141,7 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
     relationships: diagram.relationships.filter(
       (relationship) => !removedRelationshipIds.has(relationship.id),
     ),
-    view: { ...diagram.view, positions },
+    view: { ...diagram.view, positions, attributeLayout },
   }
 }
 
@@ -124,21 +153,19 @@ export const appendAttribute = (
 ): Diagram => {
   if (ownerType === 'entity') {
     const index = entityIndex(diagram, ownerId)
-    return index < 0
-      ? diagram
-      : updateEntityAt(diagram, index, (entity) => ({
-          ...entity,
-          attributes: [...entity.attributes, attribute],
-        }))
+    if (index < 0) return diagram
+    return withAttributeLayout(updateEntityAt(diagram, index, (entity) => ({
+      ...entity,
+      attributes: [...entity.attributes, attribute],
+    })))
   }
 
   const index = relationshipIndex(diagram, ownerId)
-  return index < 0
-    ? diagram
-    : updateRelationshipAt(diagram, index, (relationship) => ({
-        ...relationship,
-        attributes: [...relationship.attributes, attribute],
-      }))
+  if (index < 0) return diagram
+  return withAttributeLayout(updateRelationshipAt(diagram, index, (relationship) => ({
+    ...relationship,
+    attributes: [...relationship.attributes, attribute],
+  })))
 }
 
 export const patchAttribute = (
@@ -186,21 +213,19 @@ export const removeAttribute = (
 ): Diagram => {
   if (ownerType === 'entity') {
     const index = entityIndex(diagram, ownerId)
-    return index < 0
-      ? diagram
-      : updateEntityAt(diagram, index, (entity) => ({
-          ...entity,
-          attributes: entity.attributes.filter((attribute) => attribute.id !== attributeId),
-        }))
+    if (index < 0) return diagram
+    return withoutAttributeLayout(updateEntityAt(diagram, index, (entity) => ({
+      ...entity,
+      attributes: entity.attributes.filter((attribute) => attribute.id !== attributeId),
+    })), attributeId)
   }
 
   const index = relationshipIndex(diagram, ownerId)
-  return index < 0
-    ? diagram
-    : updateRelationshipAt(diagram, index, (relationship) => ({
-        ...relationship,
-        attributes: relationship.attributes.filter((attribute) => attribute.id !== attributeId),
-      }))
+  if (index < 0) return diagram
+  return withoutAttributeLayout(updateRelationshipAt(diagram, index, (relationship) => ({
+    ...relationship,
+    attributes: relationship.attributes.filter((attribute) => attribute.id !== attributeId),
+  })), attributeId)
 }
 
 export const insertRelationship = (
@@ -212,7 +237,11 @@ export const insertRelationship = (
   relationships: [...diagram.relationships, relationship],
   view: {
     ...diagram.view,
-    positions: { ...diagram.view.positions, [relationship.id]: position },
+    positions: {
+      ...diagram.view.positions,
+      [relationship.id]: diagram.view.layoutMode === 'structured' ? snapPoint(position) : position,
+    },
+    attributeLayout: { ...diagram.view.attributeLayout },
   },
 })
 
@@ -250,20 +279,47 @@ export const patchParticipant = (
 export const removeRelationship = (diagram: Diagram, id: string): Diagram => {
   if (relationshipIndex(diagram, id) < 0) return diagram
   const positions = { ...diagram.view.positions }
+  const attributeLayout = { ...diagram.view.attributeLayout }
   delete positions[id]
+  diagram.relationships.find((relationship) => relationship.id === id)?.attributes
+    .forEach((attribute) => delete attributeLayout[attribute.id])
   return {
     ...diagram,
     relationships: diagram.relationships.filter((relationship) => relationship.id !== id),
-    view: { ...diagram.view, positions },
+    view: { ...diagram.view, positions, attributeLayout },
   }
 }
 
-export const moveItem = (diagram: Diagram, id: string, position: Point): Diagram => ({
+export const moveItem = (diagram: Diagram, id: string, position: Point): Diagram => {
+  if (!diagram.entities.some((entity) => entity.id === id)
+    && !diagram.relationships.some((relationship) => relationship.id === id)) return diagram
+  return {
+    ...diagram,
+    view: {
+      ...diagram.view,
+      positions: {
+        ...diagram.view.positions,
+        [id]: diagram.view.layoutMode === 'structured' ? snapPoint(position) : position,
+      },
+    },
+  }
+}
+
+export const setLayoutMode = (
+  diagram: Diagram,
+  mode: Diagram['view']['layoutMode'],
+): Diagram => ({
   ...diagram,
   view: {
     ...diagram.view,
-    positions: { ...diagram.view.positions, [id]: position },
+    layoutMode: mode,
+    positions: mode === 'structured' ? snapMajorPositions(diagram) : { ...diagram.view.positions },
   },
+})
+
+export const reflowAttributes = (diagram: Diagram): Diagram => ({
+  ...diagram,
+  view: { ...diagram.view, attributeLayout: reflowAttributeLayout(diagram) },
 })
 
 export const setDiagramTheme = (
@@ -305,6 +361,12 @@ export const cloneDiagram = (diagram: Diagram): Diagram => ({
     ...diagram.view,
     positions: Object.fromEntries(
       Object.entries(diagram.view.positions).map(([id, point]) => [id, { ...point }]),
+    ),
+    attributeLayout: Object.fromEntries(
+      Object.entries(diagram.view.attributeLayout ?? {}).map(([id, assignment]) => [
+        id,
+        { ...assignment },
+      ]),
     ),
     ...(diagram.view.customTheme
       ? { customTheme: { ...diagram.view.customTheme } }
