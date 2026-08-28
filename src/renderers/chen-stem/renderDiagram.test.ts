@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { AttributeSide, Diagram } from '../../domain/types'
 import { createSampleDiagram } from '../../domain/sample'
 import { cardinalityLabelPosition, orthogonalRoute } from './ConnectorEdge'
+import { STATIC_HANDLE_SIDES, positionForSide, staticHandleId } from './handles'
 import {
   ATTRIBUTE_SIZE,
   ENTITY_SIZE,
@@ -238,6 +239,18 @@ describe('renderDiagram / Chen-stem', () => {
     const participantEdges = renderDiagram(diagram).edges.filter((edge) => edge.id.startsWith('participant-edge:'))
     expect(participantEdges).toHaveLength(3)
     expect(participantEdges.some((edge) => edge.source === 'entity:removed')).toBe(false)
+  })
+
+  it('projects participant edges only to the shared static handle contract', () => {
+    const edges = renderDiagram(denseFixture()).edges.filter((edge) => edge.id.startsWith('participant-edge:'))
+    const sourceIds = new Set(STATIC_HANDLE_SIDES.map((side) => staticHandleId('source', side)))
+    const targetIds = new Set(STATIC_HANDLE_SIDES.map((side) => staticHandleId('target', side)))
+    expect(edges.every((edge) => sourceIds.has(edge.sourceHandle!))).toBe(true)
+    expect(edges.every((edge) => targetIds.has(edge.targetHandle!))).toBe(true)
+    expect(positionForSide('north')).toBe(Position.Top)
+    expect(positionForSide('east')).toBe(Position.Right)
+    expect(positionForSide('south')).toBe(Position.Bottom)
+    expect(positionForSide('west')).toBe(Position.Left)
   })
 
   it('keeps the dense five-entity fixture aligned, attached, and non-draggable', () => {

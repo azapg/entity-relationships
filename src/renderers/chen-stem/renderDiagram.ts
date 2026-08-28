@@ -2,6 +2,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { Attribute, Diagram, Point } from '../../domain/types'
 import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, DiagramNodeData, RenderedDiagram } from '../types'
+import { staticHandleId } from './handles'
 
 /** Fixed dimensions and spacing follow the shared 24px rhythm. */
 export const ENTITY_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE * 4 }
@@ -396,7 +397,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
       edges.push({
         id: `participant-edge:${relationship.id}:${participant.entityId}:${index}`,
         type: 'connector', source: nodeId('entity', participant.entityId), target: nodeId('relationship', relationship.id),
-        sourceHandle: `source-${side}`, targetHandle: `target-${oppositeSide(side)}`,
+        sourceHandle: staticHandleId('source', side), targetHandle: staticHandleId('target', oppositeSide(side)),
         data: { connectorKind: 'participant', cardinality: participant.cardinality, selected: selectedFor(selectedId, relationship.id) },
       })
     })
