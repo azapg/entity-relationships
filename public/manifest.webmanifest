@@ -1,0 +1,21 @@
+{
+  "name": "Nightingale Schema",
+  "short_name": "Schema",
+  "description": "Un lienzo sereno para estructuras de datos.",
+  "lang": "es-PA",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "theme_color": "#fbf9f4",
+  "background_color": "#fbf9f4",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
