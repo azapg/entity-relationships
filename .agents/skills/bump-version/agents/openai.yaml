@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bump Version"
+  short_description: "Bump app version and release an APK"
+  default_prompt: "Use $bump-version to prepare and publish the next Android APK release."

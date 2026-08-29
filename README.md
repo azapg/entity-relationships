@@ -38,3 +38,16 @@ bun run preview
 El workflow `.github/workflows/deploy-pages.yml` construye y publica `dist` al hacer push a `main`. La configuración de Pages usa GitHub Actions como fuente de publicación.
 
 La ruta base de producción está configurada como `/entity-relationships/` en `vite.config.ts`. Si cambia el nombre del repositorio, cambia esa única cadena.
+
+## Android releases
+
+El workflow `.github/workflows/android-release.yml` construye el APK desde la misma aplicación web y lo adjunta a un GitHub Release. La versión de `package.json` es la fuente de verdad para el nombre y código de versión Android. Actualiza esa versión, confirma el cambio y crea un tag coincidente:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+Por ejemplo, para publicar `v0.1.1`, `package.json` debe contener `"version": "0.1.1"`.
+
+También puede ejecutarse manualmente desde la pestaña **Actions**, indicando el tag del release. No se sube el APK al repositorio; queda disponible como asset en **Releases**.

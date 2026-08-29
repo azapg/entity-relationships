@@ -24,6 +24,7 @@ import './styles/app.css'
 import { DialogScreen } from './components/DialogScreen'
 import { EditorTextInput } from './components/EditorTextInput'
 import { useDiagramStore } from './domain/store'
+import { setSystemTheme } from './platform/systemBars'
 import { describeCardinality, parseCardinalityLabel } from './domain/cardinality'
 import type { Cardinality, CustomTheme, Diagram, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
@@ -70,6 +71,7 @@ function syncSystemUi(view: Diagram['view']) {
   document.documentElement.style.setProperty('--system-surface', surface)
   document.documentElement.style.colorScheme = darkSurface ? 'dark' : 'light'
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', surface)
+  setSystemTheme(darkSurface ? 'dark' : 'light')
 }
 
 function NightingaleMark({ className = '' }: { className?: string }) {
