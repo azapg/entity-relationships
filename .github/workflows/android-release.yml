@@ -1,0 +1,90 @@
+name: Build Android APK release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to create or update, for example v0.1.0'
+        required: true
+        default: v0.1.0
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web app and sync Capacitor
+        run: bun run build:android
+
+      - name: Build debug APK
+        run: ./android/gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Prepare release asset
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "Release tag must start with v: $RELEASE_TAG"; exit 1 ;;
+          esac
+
+          safe_tag="${RELEASE_TAG//\//-}"
+          mkdir -p release-assets
+          cp android/app/build/outputs/apk/debug/app-debug.apk "release-assets/NightingaleSchema-${safe_tag}-debug.apk"
+          sha256sum "release-assets/NightingaleSchema-${safe_tag}-debug.apk" > "release-assets/NightingaleSchema-${safe_tag}-debug.apk.sha256"
+
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          safe_tag="${RELEASE_TAG//\//-}"
+          apk="release-assets/NightingaleSchema-${safe_tag}-debug.apk"
+          checksum="release-assets/NightingaleSchema-${safe_tag}-debug.apk.sha256"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$apk" "$checksum" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$apk" "$checksum" \
+              --target "$GITHUB_SHA" \
+              --title "Nightingale Schema ${RELEASE_TAG}" \
+              --generate-notes
+          fi
