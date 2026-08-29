@@ -1,4 +1,32 @@
+import groovy.json.JsonSlurper
+
 apply plugin: 'com.android.application'
+
+def packageJson = new JsonSlurper().parse(rootProject.file('../package.json'))
+def packageVersion = packageJson.version as String
+def packageVersionMatch = packageVersion =~ /^(\d+)\.(\d+)\.(\d+)$/
+
+if (!packageVersionMatch.matches()) {
+    throw new GradleException("package.json version must be stable SemVer (x.y.z), got: ${packageVersion}")
+}
+
+def versionMajor = packageVersionMatch[0][1].toLong()
+def versionMinor = packageVersionMatch[0][2].toLong()
+def versionPatch = packageVersionMatch[0][3].toLong()
+
+if (versionMinor > 999 || versionPatch > 999) {
+    throw new GradleException("package.json minor and patch versions must be at most 999: ${packageVersion}")
+}
+
+def versionCodeFromPackage = (
+    versionMajor * 1_000_000L
+    + versionMinor * 1_000L
+    + versionPatch
+)
+
+if (versionCodeFromPackage > 2_100_000_000) {
+    throw new GradleException("package.json version is too large for Android versionCode: ${packageVersion}")
+}
 
 android {
     namespace = "org.nightingalelab.schema"
@@ -7,8 +35,8 @@ android {
         applicationId "org.nightingalelab.schema"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode versionCodeFromPackage.toInteger()
+        versionName packageVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

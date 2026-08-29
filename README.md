@@ -41,11 +41,13 @@ La ruta base de producción está configurada como `/entity-relationships/` en `
 
 ## Android releases
 
-El workflow `.github/workflows/android-release.yml` construye el APK desde la misma aplicación web y lo adjunta a un GitHub Release. Para publicar una versión, crea y sube un tag:
+El workflow `.github/workflows/android-release.yml` construye el APK desde la misma aplicación web y lo adjunta a un GitHub Release. La versión de `package.json` es la fuente de verdad para el nombre y código de versión Android. Actualiza esa versión, confirma el cambio y crea un tag coincidente:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
+
+Por ejemplo, para publicar `v0.1.1`, `package.json` debe contener `"version": "0.1.1"`.
 
 También puede ejecutarse manualmente desde la pestaña **Actions**, indicando el tag del release. No se sube el APK al repositorio; queda disponible como asset en **Releases**.
