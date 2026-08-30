@@ -426,6 +426,29 @@ describe('renderDiagram / Chen-stem', () => {
       .toBe('source-north')
   })
 
+  it('moves an attribute away from a side blocked by a nearby entity', () => {
+    const person = {
+      ...entity('person'),
+      attributes: [{ id: 'person-id', name: 'id', key: true }],
+    }
+    const other = entity('other')
+    const crowded = baseDiagram({
+      entities: [person, other],
+      view: {
+        ...baseDiagram().view,
+        positions: { person: { x: 0, y: 0 }, other: { x: 240, y: 0 } },
+        attributeLayout: { 'person-id': { side: 'east' } },
+      },
+    })
+    const clear = {
+      ...crowded,
+      view: { ...crowded.view, positions: { ...crowded.view.positions, other: { x: 480, y: 0 } } },
+    }
+
+    expect(renderDiagram(clear).nodes.find((node) => node.id.endsWith(':person-id'))?.data.side).toBe('east')
+    expect(renderDiagram(crowded).nodes.find((node) => node.id.endsWith(':person-id'))?.data.side).not.toBe('east')
+  })
+
   it('treats occupied sides as hard blockers while a free side exists', () => {
     const attributes = [{ id: 'id', name: 'id', key: true }]
     expect(allocateAttributeSides(attributes, { id: { side: 'east' } }, { east: 1 }).id)

@@ -306,6 +306,20 @@ function ownerAttributes(
 }
 
 type ConnectionMap = Map<string, Partial<Record<AttributeSide, number>>>
+type Rect = { x: number; y: number; width: number; height: number }
+
+const intersects = (left: Rect, right: Rect) =>
+  left.x < right.x + right.width
+  && left.x + left.width > right.x
+  && left.y < right.y + right.height
+  && left.y + left.height > right.y
+
+const ownerRect = (owner: OwnerGeometry): Rect => ({
+  x: owner.position.x,
+  y: owner.position.y,
+  width: owner.width,
+  height: owner.height,
+})
 
 function connectionSides(
   diagram: Diagram,
@@ -332,6 +346,29 @@ function connectionSides(
       increment(participant.entityId, entitySide)
       increment(relationship.id, oppositeSide(entitySide))
     })
+  })
+  return result
+}
+
+function blockedSidesByNearbyOwners(owners: OwnerGeometry[]): ConnectionMap {
+  const result: ConnectionMap = new Map()
+  owners.forEach((owner) => {
+    const counts: Partial<Record<AttributeSide, number>> = {}
+    SIDES.forEach((side) => {
+      const geometry = attributeGeometry(owner, side, 0, 1)
+      const area: Rect = {
+        x: geometry.position.x,
+        y: geometry.position.y,
+        width: ATTRIBUTE_SIZE.width,
+        height: ATTRIBUTE_SIZE.height,
+      }
+      const collisions = owners.reduce((sum, other) => {
+        if (other.id === owner.id) return sum
+        return intersects(area, ownerRect(other)) ? sum + 1 : sum
+      }, 0)
+      if (collisions > 0) counts[side] = collisions
+    })
+    if (Object.keys(counts).length > 0) result.set(owner.id, counts)
   })
   return result
 }
@@ -379,10 +416,41 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     })
   })
 
-  const occupied = connectionSides(diagram, entityPositions, relationshipPositions, entityWidths)
+  const owners: OwnerGeometry[] = [
+    ...diagram.entities.map((entity) => ({
+      kind: 'entity' as const,
+      id: entity.id,
+      position: entityPositions.get(entity.id)!,
+      width: entityWidths.get(entity.id)!,
+      height: ENTITY_SIZE.height,
+      attributes: entity.attributes,
+    })),
+    ...diagram.relationships.map((relationship) => ({
+      kind: 'relationship' as const,
+      id: relationship.id,
+      position: relationshipPositions.get(relationship.id)!,
+      ...RELATION_SIZE,
+      attributes: relationship.attributes,
+    })),
+  ]
+
+  const connectionOccupied = connectionSides(diagram, entityPositions, relationshipPositions, entityWidths)
+  const nearbyOwnerOccupied = blockedSidesByNearbyOwners(owners)
+  const occupied = (id: string) => {
+    const connection = connectionOccupied.get(id)
+    const nearby = nearbyOwnerOccupied.get(id)
+    if (!connection && !nearby) return undefined
+    return {
+      north: (connection?.north ?? 0) + (nearby?.north ?? 0),
+      east: (connection?.east ?? 0) + (nearby?.east ?? 0),
+      south: (connection?.south ?? 0) + (nearby?.south ?? 0),
+      west: (connection?.west ?? 0) + (nearby?.west ?? 0),
+    }
+  }
+
   const assignments = view.attributeLayout ?? {}
   diagram.entities.forEach((entity) => {
-    const sides = allocateAttributeSides(entity.attributes, assignments, occupied.get(entity.id))
+    const sides = allocateAttributeSides(entity.attributes, assignments, occupied(entity.id))
     const owner: OwnerGeometry = {
       kind: 'entity', id: entity.id, position: entityPositions.get(entity.id)!,
       width: entityWidths.get(entity.id)!, height: ENTITY_SIZE.height, attributes: entity.attributes,
@@ -393,7 +461,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     ownerAttributes(owner, selectedId, projected, nodes, edges)
   })
   diagram.relationships.forEach((relationship) => {
-    const sides = allocateAttributeSides(relationship.attributes, assignments, occupied.get(relationship.id))
+    const sides = allocateAttributeSides(relationship.attributes, assignments, occupied(relationship.id))
     const owner: OwnerGeometry = {
       kind: 'relationship', id: relationship.id, position: relationshipPositions.get(relationship.id)!,
       ...RELATION_SIZE, attributes: relationship.attributes,
