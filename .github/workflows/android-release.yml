@@ -68,7 +68,8 @@ jobs:
         run: bun run build:android
 
       - name: Build debug APK
-        run: ./android/gradlew --no-daemon --stacktrace assembleDebug
+        working-directory: android
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Prepare release asset
         run: |
