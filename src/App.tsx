@@ -288,9 +288,15 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       connectionCommitted.current = false
       return
     }
-    // A rejected drop over another node is not an empty-canvas gesture. Only
-    // a connection with no target node creates the related entity.
+    // React Flow can recognize the entity under the pointer even when the
+    // connection misses one of its small target handles. Treat the whole
+    // entity body as a valid relationship drop target so desktop users can
+    // connect edge-to-edge or edge-to-center without pixel-perfect aiming.
     if (connectionState.toNode) {
+      const targetEntityId = semanticIdFromNodeId(connectionState.toNode.id)
+      if (targetEntityId) {
+        onRelationshipGesture({ sourceEntityId, targetEntityId, sourceSide })
+      }
       connectionStart.current = undefined
       return
     }
