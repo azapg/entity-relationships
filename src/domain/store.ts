@@ -82,6 +82,8 @@ export type DiagramStore = {
     ownerId: string,
     name: string,
     key?: boolean,
+    componentNames?: string[],
+    multivalued?: boolean,
   ) => string
   updateAttribute: (
     ownerType: AttributeOwner,
@@ -476,9 +478,19 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       commit(removeEntity(get().diagram, id))
     },
 
-    addAttribute: (ownerType, ownerId, name, key = false) => {
+    addAttribute: (ownerType, ownerId, name, key = false, componentNames = [], multivalued = false) => {
       const id = makeId('attribute')
-      const attribute: Attribute = { id, name: name.trim() || 'Sin nombre', key }
+      const components = componentNames
+        .map((componentName) => componentName.trim())
+        .filter(Boolean)
+        .map((componentName) => ({ id: makeId('attribute'), name: componentName, key: false }))
+      const attribute: Attribute = {
+        id,
+        name: name.trim() || 'Sin nombre',
+        key,
+        ...(multivalued ? { multivalued: true } : {}),
+        ...(components.length ? { components } : {}),
+      }
       const next = appendAttribute(get().diagram, ownerType, ownerId, attribute)
       if (!commit(next)) return ''
       return id

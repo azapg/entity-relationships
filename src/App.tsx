@@ -726,20 +726,41 @@ function AttributeEditor({ ownerType, owner, onDone, store }: any) {
   const attrs = owner?.attributes ?? []
   const [name, setName] = useState('')
   const [key, setKey] = useState(false)
+  const [compound, setCompound] = useState(false)
+  const [multivalued, setMultivalued] = useState(false)
+  const [components, setComponents] = useState('')
   const [editing, setEditing] = useState<any>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const save = (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
-    if (editing) store.updateAttribute(ownerType, owner.id, editing.id, { name: name.trim(), key })
-    else store.addAttribute(ownerType, owner.id, name.trim(), key)
+    const componentNames = compound
+      ? components.split(',').map((item) => item.trim()).filter(Boolean)
+      : []
+    if (editing) {
+      const nextComponents = componentNames.map((componentName, index) => ({
+        id: editing.components?.[index]?.id ?? `attribute-${crypto.randomUUID()}`,
+        name: componentName,
+        key: false,
+      }))
+      store.updateAttribute(ownerType, owner.id, editing.id, {
+        name: name.trim(),
+        key,
+        multivalued,
+        components: nextComponents,
+      })
+    } else store.addAttribute(ownerType, owner.id, name.trim(), key, componentNames, multivalued)
     setName('')
     setKey(false)
+    setCompound(false)
+    setMultivalued(false)
+    setComponents('')
     setEditing(null)
     nameInputRef.current?.focus({ preventScroll: true })
     window.requestAnimationFrame(() => nameInputRef.current?.focus({ preventScroll: true }))
   }
-  return <div className="form-stack dialog-form"><div className="attribute-list">{attrs.length === 0 && <p className="empty-note">Todavía no hay atributos.</p>}{attrs.map((a: any) => <div className="attribute-row" key={a.id}><span className={a.key ? 'key-dot filled' : 'key-dot'} /> <span>{a.name}</span>{a.key && <KeyRound size={13} /> }<button onClick={() => { setEditing(a); setName(a.name); setKey(a.key) }} aria-label={`Editar ${a.name}`}><Pencil size={14} /></button><button onClick={() => store.deleteAttribute(ownerType, owner.id, a.id)} aria-label={`Eliminar ${a.name}`}><Trash2 size={14} /></button></div>)}</div><form onSubmit={save} className="attribute-add dialog-attribute-form"><label>{editing ? 'Editar atributo' : 'Nuevo atributo'}<EditorTextInput ref={nameInputRef} autoFocus={!editing} value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. nombre" /></label><label className="check-label"><input type="checkbox" checked={key} onChange={e => setKey(e.target.checked)} /> <span className="key-dot filled" /> Es atributo clave</label><div className="form-actions"><button type="button" className="secondary-button" onClick={() => { if (editing) { setEditing(null); setName(''); setKey(false) } else onDone() }}>{editing ? 'Cancelar' : 'Cerrar'}</button><button className="primary-button" disabled={!name.trim()}>{editing ? 'Guardar' : 'Añadir'}</button></div></form></div>
+  const resetEditor = () => { setEditing(null); setName(''); setKey(false); setCompound(false); setMultivalued(false); setComponents('') }
+  return <div className="form-stack dialog-form"><div className="attribute-list">{attrs.length === 0 && <p className="empty-note">Todavía no hay atributos.</p>}{attrs.map((a: any) => <div className="attribute-row" key={a.id}><span className={a.key ? 'key-dot filled' : 'key-dot'} /> <span>{a.name}{a.multivalued ? ' · multivalorado' : ''}{a.components?.length ? ` (${a.components.map((component: any) => component.name).join(', ')})` : ''}</span>{a.key && <KeyRound size={13} /> }<button onClick={() => { setEditing(a); setName(a.name); setKey(a.key); setCompound(Boolean(a.components?.length)); setMultivalued(Boolean(a.multivalued)); setComponents(a.components?.map((component: any) => component.name).join(', ') ?? '') }} aria-label={`Editar ${a.name}`}><Pencil size={14} /></button><button onClick={() => store.deleteAttribute(ownerType, owner.id, a.id)} aria-label={`Eliminar ${a.name}`}><Trash2 size={14} /></button></div>)}</div><form onSubmit={save} className="attribute-add dialog-attribute-form"><label>{editing ? 'Editar atributo' : 'Nuevo atributo'}<EditorTextInput ref={nameInputRef} autoFocus={!editing} value={name} onChange={e => setName(e.target.value)} placeholder="p. ej. nombre" /></label><label className="check-label"><input type="checkbox" checked={key} onChange={e => setKey(e.target.checked)} /> <span className="key-dot filled" /> Es atributo clave</label><label className="check-label"><input type="checkbox" checked={compound} onChange={e => { setCompound(e.target.checked); if (e.target.checked) setMultivalued(false) }} /> Es atributo compuesto</label><label className="check-label"><input type="checkbox" checked={multivalued} onChange={e => { setMultivalued(e.target.checked); if (e.target.checked) setCompound(false) }} /> Es atributo multivalorado</label>{compound && <label>Componentes<EditorTextInput value={components} onChange={e => setComponents(e.target.value)} placeholder="nombre, primer apellido, segundo apellido" /><small>Separa cada componente con una coma.</small></label>}<div className="form-actions"><button type="button" className="secondary-button" onClick={() => { if (editing) resetEditor(); else onDone() }}>{editing ? 'Cancelar' : 'Cerrar'}</button><button className="primary-button" disabled={!name.trim() || (compound && !components.trim())}>{editing ? 'Guardar' : 'Añadir'}</button></div></form></div>
 }
 
 const RECURSIVE_TARGET = '__recursive__'

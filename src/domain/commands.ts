@@ -21,7 +21,7 @@ import {
 
 export type AttributeOwner = 'entity' | 'relationship'
 
-export type AttributePatch = Partial<Pick<Attribute, 'name' | 'key'>>
+export type AttributePatch = Partial<Pick<Attribute, 'name' | 'key' | 'multivalued' | 'components'>>
 
 const cleanName = (name: string, fallback: string) => name.trim() || fallback
 
@@ -193,6 +193,8 @@ export const patchAttribute = (
             ...attribute,
             ...(patch.name === undefined ? {} : { name: cleanName(patch.name, 'Sin nombre') }),
             ...(patch.key === undefined ? {} : { key: patch.key }),
+            ...(patch.multivalued === undefined ? {} : { multivalued: patch.multivalued }),
+            ...(patch.components === undefined ? {} : { components: patch.components }),
           }
         : attribute,
     )

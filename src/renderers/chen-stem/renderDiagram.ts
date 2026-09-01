@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { Attribute, Diagram, Point } from '../../domain/types'
+import type { Attribute, Diagram, Point, Relationship } from '../../domain/types'
 import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, DiagramNodeData, RenderedDiagram } from '../types'
 import { staticHandleId } from './handles'
@@ -9,6 +9,7 @@ export const ENTITY_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE * 4 }
 export const RELATION_SIZE = { width: GRID_SIZE * 4, height: GRID_SIZE * 4 }
 export const ATTRIBUTE_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE }
 export const ATTRIBUTE_GAP = GRID_SIZE
+export const COMPOUND_LEAD = GRID_SIZE * 4
 export const TERMINAL_SIZE = 12
 export const MAX_ENTITY_WIDTH = GRID_SIZE * 20
 /** Keep the diamond tips on the same grid boundary as the node box. */
@@ -40,6 +41,17 @@ type ProjectedAttribute = {
 const nodeId = (kind: OwnerKind, id: string) => `${kind}:${id}`
 export const attrNodeId = (kind: OwnerKind, ownerId: string, attributeId: string) =>
   `attribute:${kind}:${ownerId}:${attributeId}`
+
+export function isDirectStrongWeakRelationship(diagram: Diagram, relationship: Relationship): boolean {
+  if (relationship.participants.length !== 2) return false
+  const [first, second] = relationship.participants
+  if (first.entityId === second.entityId) return false
+  const kinds = [
+    diagram.entities.find((entity) => entity.id === first.entityId)?.kind,
+    diagram.entities.find((entity) => entity.id === second.entityId)?.kind,
+  ]
+  return kinds.includes('strong') && kinds.includes('weak')
+}
 
 export const snapPoint = (point: Point, grid = GRID_SIZE): Point => ({
   x: Math.round(point.x / grid) * grid,
@@ -244,7 +256,21 @@ export function ownerAttributeGeometries(
   const indices: Record<AttributeSide, number> = { north: 0, east: 0, south: 0, west: 0 }
   return owner.attributes.map((attribute) => {
     const side = assignments[attribute.id]
-    return { attribute, geometry: attributeGeometry(owner, side, indices[side]++, counts[side]) }
+    const geometry = attributeGeometry(owner, side, indices[side]++, counts[side])
+    if (!attribute.components?.length) return { attribute, geometry }
+    const extension = COMPOUND_LEAD - ATTRIBUTE_GAP
+    const delta = side === 'east' ? { x: extension, y: 0 }
+      : side === 'west' ? { x: -extension, y: 0 }
+        : side === 'north' ? { x: 0, y: -extension }
+          : { x: 0, y: extension }
+    return {
+      attribute,
+      geometry: {
+        ...geometry,
+        terminal: { x: geometry.terminal.x + delta.x, y: geometry.terminal.y + delta.y },
+        position: { x: geometry.position.x + delta.x, y: geometry.position.y + delta.y },
+      },
+    }
   })
 }
 
@@ -282,6 +308,7 @@ function ownerAttributes(
         label: attribute.name,
         selected: false,
         key: attribute.key,
+        multivalued: Boolean(attribute.multivalued),
         ownerId: owner.id,
         ownerKind: owner.kind,
         ownerType: owner.kind,
@@ -290,6 +317,7 @@ function ownerAttributes(
         step: geometry.step,
         terminal: geometry.terminal,
         attachment: geometry.attachment,
+        hasComponents: Boolean(attribute.components?.length),
       },
     })
     edges.push({
@@ -301,6 +329,60 @@ function ownerAttributes(
       targetHandle: 'target-terminal',
       selectable: false,
       data: { connectorKind: 'attribute', side, lane: side, sourceKind: owner.kind, selected: selectedFor(selectedId, owner.id) },
+    })
+
+    const components = attribute.components ?? []
+    const middle = (components.length - 1) / 2
+    components.forEach((component, componentIndex) => {
+      const spread = (componentIndex - middle) * GRID_SIZE * 2
+      const distance = ATTRIBUTE_GAP * 4
+      const terminal = side === 'east'
+        ? { x: geometry.terminal.x + distance, y: geometry.terminal.y + spread }
+        : side === 'west'
+          ? { x: geometry.terminal.x - distance, y: geometry.terminal.y + spread }
+          : side === 'north'
+            ? { x: geometry.terminal.x + spread, y: geometry.terminal.y - distance }
+            : { x: geometry.terminal.x + spread, y: geometry.terminal.y + distance }
+      const position = side === 'east'
+        ? { x: terminal.x - TERMINAL_SIZE / 2, y: terminal.y - ATTRIBUTE_SIZE.height / 2 }
+        : side === 'west'
+          ? { x: terminal.x - ATTRIBUTE_SIZE.width + TERMINAL_SIZE / 2, y: terminal.y - ATTRIBUTE_SIZE.height / 2 }
+          : side === 'north'
+            ? { x: terminal.x - ATTRIBUTE_SIZE.width / 2, y: terminal.y - ATTRIBUTE_SIZE.height + TERMINAL_SIZE / 2 }
+            : { x: terminal.x - ATTRIBUTE_SIZE.width / 2, y: terminal.y - TERMINAL_SIZE / 2 }
+      const componentId = attrNodeId(owner.kind, owner.id, component.id)
+      nodes.push({
+        id: componentId,
+        type: 'attribute',
+        position,
+        width: ATTRIBUTE_SIZE.width,
+        height: ATTRIBUTE_SIZE.height,
+        draggable: false,
+        selectable: false,
+        data: {
+          semanticId: component.id,
+          kind: 'attribute',
+          label: component.name,
+          selected: false,
+          key: component.key,
+          ownerId: owner.id,
+          ownerKind: owner.kind,
+          ownerType: owner.kind,
+          side,
+          lane: side,
+          terminal,
+        },
+      })
+      edges.push({
+        id: `component-edge:${owner.kind}:${owner.id}:${attribute.id}:${component.id}`,
+        type: 'connector',
+        source: id,
+        target: componentId,
+        sourceHandle: 'source-components',
+        targetHandle: 'target-terminal',
+        selectable: false,
+        data: { connectorKind: 'attribute', side, lane: side, sourceKind: owner.kind, straight: true },
+      })
     })
   })
 }
@@ -334,6 +416,17 @@ function connectionSides(
     result.set(id, current)
   }
   diagram.relationships.forEach((relationship) => {
+    if (isDirectStrongWeakRelationship(diagram, relationship)) {
+      const [first, second] = relationship.participants
+      const firstPosition = entityPositions.get(first.entityId)
+      const secondPosition = entityPositions.get(second.entityId)
+      const firstWidth = entityWidths.get(first.entityId)
+      const secondWidth = entityWidths.get(second.entityId)
+      if (!firstPosition || !secondPosition || !firstWidth || !secondWidth) return
+      increment(first.entityId, sideFor(center(firstPosition, firstWidth, ENTITY_SIZE.height), center(secondPosition, secondWidth, ENTITY_SIZE.height)))
+      increment(second.entityId, sideFor(center(secondPosition, secondWidth, ENTITY_SIZE.height), center(firstPosition, firstWidth, ENTITY_SIZE.height)))
+      return
+    }
     const relationshipPosition = relationshipPositions.get(relationship.id)
     if (!relationshipPosition) return
     const relationshipCenter = center(relationshipPosition, RELATION_SIZE.width, RELATION_SIZE.height)
@@ -405,6 +498,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
   diagram.relationships.forEach((relationship, index) => {
     const position = normalizedPosition(positions[relationship.id] ?? { x: GRID_SIZE * (10 + index * 12), y: GRID_SIZE * 14 })
     relationshipPositions.set(relationship.id, position)
+    if (isDirectStrongWeakRelationship(diagram, relationship)) return
     nodes.push({
       id: nodeId('relationship', relationship.id), type: 'relationship', position,
       width: RELATION_SIZE.width, height: RELATION_SIZE.height, draggable: true,
@@ -425,7 +519,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
       height: ENTITY_SIZE.height,
       attributes: entity.attributes,
     })),
-    ...diagram.relationships.map((relationship) => ({
+    ...diagram.relationships.filter((relationship) => !isDirectStrongWeakRelationship(diagram, relationship)).map((relationship) => ({
       kind: 'relationship' as const,
       id: relationship.id,
       position: relationshipPositions.get(relationship.id)!,
@@ -461,6 +555,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     ownerAttributes(owner, selectedId, projected, nodes, edges)
   })
   diagram.relationships.forEach((relationship) => {
+    if (isDirectStrongWeakRelationship(diagram, relationship)) return
     const sides = allocateAttributeSides(relationship.attributes, assignments, occupied(relationship.id))
     const owner: OwnerGeometry = {
       kind: 'relationship', id: relationship.id, position: relationshipPositions.get(relationship.id)!,
@@ -474,6 +569,40 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
 
   const byId = new Map(diagram.entities.map((entity) => [entity.id, entity]))
   diagram.relationships.forEach((relationship) => {
+    if (isDirectStrongWeakRelationship(diagram, relationship)) {
+      const [sourceParticipant, targetParticipant] = relationship.participants
+      const sourcePosition = entityPositions.get(sourceParticipant.entityId)
+      const targetPosition = entityPositions.get(targetParticipant.entityId)
+      const sourceWidth = entityWidths.get(sourceParticipant.entityId)
+      const targetWidth = entityWidths.get(targetParticipant.entityId)
+      if (!sourcePosition || !targetPosition || !sourceWidth || !targetWidth) return
+      const sourceSide = sideFor(
+        center(sourcePosition, sourceWidth, ENTITY_SIZE.height),
+        center(targetPosition, targetWidth, ENTITY_SIZE.height),
+      )
+      const targetSide = sideFor(
+        center(targetPosition, targetWidth, ENTITY_SIZE.height),
+        center(sourcePosition, sourceWidth, ENTITY_SIZE.height),
+      )
+      edges.push({
+        id: `direct-relationship-edge:${relationship.id}`,
+        type: 'connector',
+        source: nodeId('entity', sourceParticipant.entityId),
+        target: nodeId('entity', targetParticipant.entityId),
+        sourceHandle: staticHandleId('source', sourceSide),
+        targetHandle: staticHandleId('target', targetSide),
+        selectable: false,
+        data: {
+          connectorKind: 'participant',
+          relationshipId: relationship.id,
+          cardinality: sourceParticipant.cardinality,
+          targetCardinality: targetParticipant.cardinality,
+          cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
+          selected: selectedFor(selectedId, relationship.id),
+        },
+      })
+      return
+    }
     const participantCounts = new Map<string, number>()
     relationship.participants.forEach((participant) => {
       participantCounts.set(participant.entityId, (participantCounts.get(participant.entityId) ?? 0) + 1)

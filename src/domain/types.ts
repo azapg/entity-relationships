@@ -13,6 +13,8 @@ export type Attribute = {
   id: string
   name: string
   key: boolean
+  multivalued?: boolean
+  components?: Attribute[]
 }
 
 export type Entity = {

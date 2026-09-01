@@ -9,6 +9,8 @@ export type ConnectorData = {
   connectorKind?: 'participant' | 'attribute'
   relationshipId?: string
   cardinality?: Cardinality
+  targetCardinality?: Cardinality
+  straight?: boolean
   side?: 'north' | 'east' | 'south' | 'west'
   sourceKind?: 'entity' | 'relationship'
   selected?: boolean
@@ -90,16 +92,28 @@ export function offsetConnectionPoint(
   return { x: point.x + offset, y: point.y }
 }
 
-/** Position a cardinality close to its participant endpoint, beside the first
- * segment so the text never floats at the center of a long relationship. */
-export function cardinalityLabelPosition(points: RoutePoint[], distance = 28): Point {
+/** Position a cardinality along the routed connector and offset it from the
+ * active segment so vertical and horizontal labels remain equally legible. */
+export function cardinalityLabelPosition(points: RoutePoint[], fraction = 0.5): Point {
   if (points.length < 2) return points[0] ?? { x: 0, y: 0 }
-  const start = points[0]
-  const next = points[1]
+  const segments = points.slice(1).map((point, index) => ({
+    start: points[index],
+    end: point,
+    length: Math.hypot(point.x - points[index].x, point.y - points[index].y),
+  }))
+  const targetDistance = segments.reduce((sum, segment) => sum + segment.length, 0) * fraction
+  let traversed = 0
+  const segment = segments.find((candidate) => {
+    if (traversed + candidate.length >= targetDistance) return true
+    traversed += candidate.length
+    return false
+  }) ?? segments.at(-1)!
+  const start = segment.start
+  const next = segment.end
   const dx = next.x - start.x
   const dy = next.y - start.y
-  const length = Math.hypot(dx, dy) || 1
-  const amount = Math.abs(dx) >= Math.abs(dy) ? Math.min(distance, length / 2) : length / 2
+  const length = segment.length || 1
+  const amount = Math.max(0, Math.min(length, targetDistance - traversed))
   const x = start.x + (dx / length) * amount
   const y = start.y + (dy / length) * amount
   // The label has a padded ~18px line box. A 12px center offset leaves a
@@ -112,16 +126,17 @@ export function ConnectorEdge({
   sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, id,
 }: EdgeProps<ConnectorEdgeType>) {
   const recursiveOffset = data?.recursiveOffset ?? 0
-  const points = orthogonalRoute(
-    offsetConnectionPoint({ x: sourceX, y: sourceY }, sourcePosition, recursiveOffset, 'source'),
-    offsetConnectionPoint({ x: targetX, y: targetY }, targetPosition, recursiveOffset, 'target'),
-    sourcePosition,
-    targetPosition,
-  )
+  const source = offsetConnectionPoint({ x: sourceX, y: sourceY }, sourcePosition, recursiveOffset, 'source')
+  const target = offsetConnectionPoint({ x: targetX, y: targetY }, targetPosition, recursiveOffset, 'target')
+  const points = data?.straight ? [source, target] : orthogonalRoute(source, target, sourcePosition, targetPosition)
   const cardinality = data?.connectorKind === 'participant' && data.cardinality
     ? data.cardinalityPending ? '(?)' : cardinalityLabel(data.cardinality)
     : undefined
-  const label = cardinality ? cardinalityLabelPosition(points) : undefined
+  const label = cardinality ? cardinalityLabelPosition(points, data?.targetCardinality ? 0.33 : 0.5) : undefined
+  const targetCardinality = data?.connectorKind === 'participant' && data.targetCardinality
+    ? data.cardinalityPending ? '(?)' : cardinalityLabel(data.targetCardinality)
+    : undefined
+  const targetLabel = targetCardinality ? cardinalityLabelPosition(points, 0.67) : undefined
 
   return (
     <>
@@ -142,6 +157,20 @@ export function ConnectorEdge({
             }}
           >
             {cardinality}
+          </span>
+        </EdgeLabelRenderer>
+      )}
+      {targetCardinality && targetLabel && (
+        <EdgeLabelRenderer>
+          <span
+            className={`chen-cardinality-label nopan${data?.onCardinalityDoubleClick ? ' is-editable' : ''}`}
+            style={{ transform: `translate(-50%, -50%) translate(${targetLabel.x}px,${targetLabel.y}px)` }}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              data?.onCardinalityDoubleClick?.()
+            }}
+          >
+            {targetCardinality}
           </span>
         </EdgeLabelRenderer>
       )}

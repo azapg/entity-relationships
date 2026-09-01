@@ -105,6 +105,39 @@
 .chen-attribute-node--north .chen-node__label { left: 0; bottom: 18px; width: 100%; text-align: center; }
 .chen-attribute-node--south .chen-attribute-node__terminal { left: calc(50% - 6px); top: 0; }
 .chen-attribute-node--south .chen-node__label { left: 0; top: 18px; width: 100%; text-align: center; }
+.chen-attribute-node.is-compound .chen-node__label {
+  z-index: 2;
+  width: max-content;
+  max-width: 172px;
+  padding: 1px 4px;
+  background: var(--canvas, #fbfaf6);
+}
+.chen-attribute-node--east.is-compound .chen-node__label { left: -42px; top: -19px; transform: translateX(-50%); }
+.chen-attribute-node--west.is-compound .chen-node__label { left: 234px; right: auto; top: -19px; transform: translateX(-50%); }
+.chen-attribute-node--north.is-compound .chen-node__label { left: calc(50% + 12px); top: 58px; bottom: auto; text-align: left; }
+.chen-attribute-node--south.is-compound .chen-node__label { left: calc(50% + 12px); top: -58px; text-align: left; }
+.chen-multivalue-fork {
+  position: absolute;
+  z-index: 0;
+  width: 48px;
+  height: 48px;
+  overflow: visible;
+  pointer-events: none;
+}
+.chen-multivalue-fork path {
+  fill: none;
+  stroke: var(--ink, #25231f);
+  stroke-width: var(--stroke-width, 1.35px);
+  vector-effect: non-scaling-stroke;
+}
+.chen-attribute-node--east .chen-multivalue-fork { left: 0; top: -12px; }
+.chen-attribute-node--west .chen-multivalue-fork { right: 0; top: -12px; transform: rotate(180deg); }
+.chen-attribute-node--north .chen-multivalue-fork { left: 90px; top: 0; transform: rotate(-90deg); transform-origin: 6px 24px; }
+.chen-attribute-node--south .chen-multivalue-fork { left: 90px; top: -24px; transform: rotate(90deg); transform-origin: 6px 24px; }
+.chen-attribute-node--east.is-multivalued .chen-node__label { left: 54px; }
+.chen-attribute-node--west.is-multivalued .chen-node__label { right: 54px; }
+.chen-attribute-node--north.is-multivalued .chen-node__label { bottom: 52px; }
+.chen-attribute-node--south.is-multivalued .chen-node__label { top: 52px; }
 /* Keyness is intentionally carried by the terminal marker only. */
 .chen-node__label.is-key { text-decoration: none; }
 

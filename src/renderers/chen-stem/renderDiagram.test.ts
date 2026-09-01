@@ -7,6 +7,7 @@ import { cardinalityLabelPosition, offsetConnectionPoint, orthogonalRoute } from
 import { connectionHandleBox, STATIC_HANDLE_SIDES, positionForSide, staticHandleId } from './handles'
 import {
   ATTRIBUTE_SIZE,
+  COMPOUND_LEAD,
   DIAMOND_INSET,
   ENTITY_SIZE,
   MAX_ENTITY_WIDTH,
@@ -455,7 +456,7 @@ describe('renderDiagram / Chen-stem', () => {
       .not.toBe('east')
   })
 
-  it('routes every connector orthogonally and keeps cardinality near the source', () => {
+  it('routes every connector orthogonally and centers cardinality along the route', () => {
     const routes = [
       orthogonalRoute({ x: 0, y: 0 }, { x: 100, y: 0 }, Position.Right, Position.Left),
       orthogonalRoute({ x: 0, y: 0 }, { x: 100, y: 80 }, Position.Right, Position.Left),
@@ -466,9 +467,79 @@ describe('renderDiagram / Chen-stem', () => {
       expect(point.x === previous.x || point.y === previous.y).toBe(true)
     }))
     expect(routes[0]).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }])
-    expect(cardinalityLabelPosition(routes[0])).toEqual({ x: 28, y: -12 })
+    expect(cardinalityLabelPosition(routes[0])).toEqual({ x: 50, y: -12 })
     expect(cardinalityLabelPosition(orthogonalRoute(
       { x: 0, y: 0 }, { x: 100, y: 80 }, Position.Bottom, Position.Left,
-    ))).toEqual({ x: 12, y: 40 })
+    ))).toEqual({ x: 10, y: 68 })
+  })
+
+  it('projects compound attribute components as branches from their parent', () => {
+    const diagram = baseDiagram({
+      entities: [{
+        ...entity('person'),
+        attributes: [{
+          id: 'name', name: 'Nombre', key: false,
+          components: [
+            { id: 'first-name', name: 'Nombre', key: false },
+            { id: 'first-surname', name: 'Primer apellido', key: false },
+            { id: 'second-surname', name: 'Segundo apellido', key: false },
+          ],
+        }],
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: { person: { x: 0, y: 0 } },
+        attributeLayout: { name: { side: 'east' } },
+      },
+    })
+    const rendered = renderDiagram(diagram)
+    const parent = rendered.nodes.find((node) => node.id.endsWith(':name'))
+    const componentEdges = rendered.edges.filter((edge) => edge.id.startsWith('component-edge:'))
+
+    expect(parent?.data.hasComponents).toBe(true)
+    expect((parent?.data.terminal as { x: number }).x - (parent?.data.attachment as { x: number }).x).toBe(COMPOUND_LEAD)
+    expect(componentEdges).toHaveLength(3)
+    expect(new Set(componentEdges.map((edge) => edge.source))).toEqual(new Set([parent?.id]))
+  })
+
+  it('marks multivalued attributes for the three-way fork renderer', () => {
+    const diagram = baseDiagram({
+      entities: [{
+        ...entity('client'),
+        attributes: [{ id: 'phones', name: 'Teléfonos', key: false, multivalued: true }],
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: { client: { x: 0, y: 0 } },
+        attributeLayout: { phones: { side: 'east' } },
+      },
+    })
+
+    expect(renderDiagram(diagram).nodes.find((node) => node.id.endsWith(':phones'))?.data.multivalued)
+      .toBe(true)
+  })
+
+  it('renders a strong-to-weak relationship as one direct line without a diamond', () => {
+    const diagram = baseDiagram({
+      entities: [entity('owner'), entity('dependent', 'weak')],
+      relationships: [{
+        id: 'identifies', name: 'IDENTIFICA', attributes: [],
+        participants: [
+          { entityId: 'owner', cardinality: { min: 1, max: 1 } },
+          { entityId: 'dependent', cardinality: { min: 1, max: 'n' } },
+        ],
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: { owner: { x: 0, y: 0 }, dependent: { x: 480, y: 0 }, identifies: { x: 240, y: 0 } },
+      },
+    })
+    const rendered = renderDiagram(diagram)
+    const direct = rendered.edges.find((edge) => edge.id === 'direct-relationship-edge:identifies')
+
+    expect(rendered.nodes.some((node) => node.id === 'relationship:identifies')).toBe(false)
+    expect(direct?.source).toBe('entity:owner')
+    expect(direct?.target).toBe('entity:dependent')
+    expect(direct?.data?.targetCardinality).toEqual({ min: 1, max: 'n' })
   })
 })
