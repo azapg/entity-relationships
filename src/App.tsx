@@ -148,6 +148,22 @@ function clientPoint(event: MouseEvent | TouchEvent): Point | undefined {
   return { x: event.clientX, y: event.clientY }
 }
 
+/** React Flow only reports a target node when the pointer lands on a target
+ * handle. Entity bodies are intentionally not connectable targets in the
+ * Chen renderer, so resolve a body drop against the controlled projection. */
+function entityAtFlowPoint(nodes: Node<DiagramNodeData>[], point: Point): string | undefined {
+  const hit = [...nodes].reverse().find((node) => {
+    if (node.data.kind !== 'entity') return false
+    const width = node.data.width ?? node.width ?? 192
+    const height = node.data.height ?? node.height ?? 96
+    return point.x >= node.position.x
+      && point.x <= node.position.x + width
+      && point.y >= node.position.y
+      && point.y <= node.position.y + height
+  })
+  return hit?.data.kind === 'entity' ? hit.data.semanticId : undefined
+}
+
 function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsFor, onRelationshipGesture }: {
   diagram: any
   selection: SemanticSelection
@@ -288,24 +304,23 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       connectionCommitted.current = false
       return
     }
-    // React Flow can recognize the entity under the pointer even when the
-    // connection misses one of its small target handles. Treat the whole
-    // entity body as a valid relationship drop target so desktop users can
-    // connect edge-to-edge or edge-to-center without pixel-perfect aiming.
-    if (connectionState.toNode) {
-      const targetEntityId = semanticIdFromNodeId(connectionState.toNode.id)
-      if (targetEntityId) {
-        onRelationshipGesture({ sourceEntityId, targetEntityId, sourceSide })
-      }
-      connectionStart.current = undefined
-      return
-    }
     const point = clientPoint(event)
     if (point) {
       const dropPosition = rf.screenToFlowPosition(point, {
         snapToGrid: layoutMode === 'structured',
         snapGrid: [GRID_SIZE, GRID_SIZE],
       })
+
+      // Prefer React Flow's semantic target when available, then fall back to
+      // an explicit body hit test for drops in the middle of an entity.
+      const targetEntityId = semanticIdFromNodeId(connectionState.toNode?.id)
+        ?? entityAtFlowPoint(nodes, dropPosition)
+      if (targetEntityId) {
+        onRelationshipGesture({ sourceEntityId, targetEntityId, sourceSide })
+        connectionStart.current = undefined
+        return
+      }
+
       onRelationshipGesture({
         sourceEntityId,
         sourceSide,
@@ -316,7 +331,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       })
     }
     connectionStart.current = undefined
-  }, [layoutMode, onRelationshipGesture, rf])
+  }, [layoutMode, nodes, onRelationshipGesture, rf])
 
   const isValidConnection = useCallback((connection: Connection | Edge) => (
     Boolean(
@@ -603,7 +618,10 @@ function EditorApp() {
 
   if (!diagram) return <main className="loading">Cargando Nightingale Schema…</main>
 
-  return <main className={`app-shell theme-${diagram.view.theme}`} style={customStyle(diagram.view.customTheme)} aria-label="Nightingale Schema">
+  const darkSurface = diagram.view.theme === 'modern'
+    || (diagram.view.theme === 'custom' && isDarkSurface(diagram.view.customTheme?.background ?? LIGHT_SURFACE))
+
+  return <main className={`app-shell theme-${diagram.view.theme}${darkSurface ? ' is-dark-surface' : ''}`} style={customStyle(diagram.view.customTheme)} aria-label="Nightingale Schema">
     <header className="topbar">
       <div className="top-left">
         <div className="product-lockup" aria-label="Nightingale Schema">

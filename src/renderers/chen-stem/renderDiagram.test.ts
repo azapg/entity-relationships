@@ -7,6 +7,7 @@ import { cardinalityLabelPosition, offsetConnectionPoint, orthogonalRoute } from
 import { connectionHandleBox, STATIC_HANDLE_SIDES, positionForSide, staticHandleId } from './handles'
 import {
   ATTRIBUTE_SIZE,
+  COMPOUND_COMPONENT_GAP,
   COMPOUND_LEAD,
   DIAMOND_INSET,
   ENTITY_SIZE,
@@ -182,6 +183,33 @@ describe('renderDiagram / Chen-stem', () => {
     expect(localTerminal(attributeGeometry(owner, 'west', 0, 1))).toEqual({ x: ATTRIBUTE_SIZE.width - 6, y: 12 })
     expect(localTerminal(attributeGeometry(owner, 'north', 0, 1))).toEqual({ x: ATTRIBUTE_SIZE.width / 2, y: 18 })
     expect(localTerminal(attributeGeometry(owner, 'south', 0, 1))).toEqual({ x: ATTRIBUTE_SIZE.width / 2, y: 6 })
+  })
+
+  it('gives long compound children enough room to stay visually separate', () => {
+    const diagram = baseDiagram({
+      entities: [{
+        ...entity('person'),
+        attributes: [{
+          id: 'address', name: 'Dirección completa', key: false,
+          components: [
+            { id: 'street', name: 'Calle principal', key: false },
+            { id: 'city', name: 'Ciudad de residencia', key: false },
+          ],
+        }],
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: { person: { x: 0, y: 0 } },
+        attributeLayout: { address: { side: 'east' } },
+      },
+    })
+    const result = renderDiagram(diagram)
+    const parent = result.nodes.find((node) => node.id === 'attribute:entity:person:address')!
+    const children = ['street', 'city'].map((id) => result.nodes.find((node) => node.id.endsWith(`:${id}`))!)
+
+    expect(parent.data.hasComponents).toBe(true)
+    expect(children.every((node) => node.data.compoundComponent === true)).toBe(true)
+    expect(Math.abs(children[1].position.y - children[0].position.y)).toBe(COMPOUND_COMPONENT_GAP)
   })
 
   it('places relationship attribute attachments exactly on the visible diamond', () => {

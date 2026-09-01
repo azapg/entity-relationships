@@ -51,6 +51,23 @@ button:disabled { opacity: .38; cursor: default; }
 .app-shell.theme-warm { --canvas: #fbf9f4; --ink: #1c1915; --entity-fill: #ffd9cb; --entity-stroke: #9c3b23; --relationship-fill: #f6e3da; --relationship-stroke: #7e2e19; --key-marker: #1c1915; --grid: #e3dccf; }
 .app-shell.theme-modern { --canvas: #14120f; --ink: #f2ede3; --entity-fill: #1d1a16; --entity-stroke: #79abc9; --relationship-fill: #2e1c15; --relationship-stroke: #d9714f; --key-marker: #f2ede3; --grid: #2e2923; --diagram-font: var(--ui-font); }
 .app-shell.theme-custom { --canvas: var(--custom-bg); --ink: var(--custom-ink); --entity-fill: var(--custom-entity); --entity-stroke: var(--custom-ink); --relationship-fill: var(--custom-relationship); --relationship-stroke: var(--custom-ink); --key-marker: var(--custom-ink); --grid: color-mix(in srgb, var(--custom-ink) 14%, var(--custom-bg)); --diagram-font: var(--custom-font); }
+.app-shell.is-dark-surface {
+  --ui-bg: #14120f;
+  --ui-raised: #1d1a16;
+  --ui-sunken: #242019;
+  --ui-text: #f2ede3;
+  --ui-muted: #b8afa1;
+  --ui-faint: #81786c;
+  --ui-border: #3e372e;
+  --ui-border-strong: #5a4f42;
+  --ui-accent: #d9714f;
+  --ui-accent-hover: #ef8b66;
+  --ui-accent-wash: #43251d;
+  --ui-shadow: 0 1px 2px rgb(0 0 0 / .28), 0 10px 28px rgb(0 0 0 / .18);
+  --panel: var(--ui-raised);
+  --muted: var(--ui-muted);
+  --accent: var(--ui-accent);
+}
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
 .topbar { position: absolute; inset: 0 0 auto; height: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: calc(14px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))) max(16px, var(--safe-area-inset-right, env(safe-area-inset-right, 0px))) 0 max(16px, var(--safe-area-inset-left, env(safe-area-inset-left, 0px))); gap: 12px; z-index: 8; pointer-events: none; }
 .topbar > *, .top-actions { pointer-events: auto; }

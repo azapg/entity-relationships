@@ -105,10 +105,11 @@
 .chen-attribute-node--north .chen-node__label { left: 0; bottom: 18px; width: 100%; text-align: center; }
 .chen-attribute-node--south .chen-attribute-node__terminal { left: calc(50% - 6px); top: 0; }
 .chen-attribute-node--south .chen-node__label { left: 0; top: 18px; width: 100%; text-align: center; }
-.chen-attribute-node.is-compound .chen-node__label {
+.chen-attribute-node.is-compound .chen-node__label,
+.chen-attribute-node.is-compound-component .chen-node__label {
   z-index: 2;
   width: max-content;
-  max-width: 172px;
+  max-width: 256px;
   padding: 1px 4px;
   background: var(--canvas, #fbfaf6);
 }

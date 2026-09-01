@@ -4,6 +4,7 @@ import type { DiagramNodeData } from '../types'
 type AttributeNodeData = DiagramNodeData & {
   key?: boolean
   hasComponents?: boolean
+  compoundComponent?: boolean
   multivalued?: boolean
   lane?: 'north' | 'east' | 'south' | 'west'
   side?: 'north' | 'east' | 'south' | 'west'
@@ -23,7 +24,7 @@ export function AttributeNode({ data, selected }: NodeProps<AttributeNodeType>) 
         : { left: 90, top: 0, bottom: 'auto', transform: 'none' }
   return (
     <div
-      className={`chen-node chen-attribute-node chen-attribute-node--${lane}${data.hasComponents ? ' is-compound' : ''}${data.multivalued ? ' is-multivalued' : ''}${selected || data.selected ? ' is-selected' : ''}`}
+      className={`chen-node chen-attribute-node chen-attribute-node--${lane}${data.hasComponents ? ' is-compound' : ''}${data.compoundComponent ? ' is-compound-component' : ''}${data.multivalued ? ' is-multivalued' : ''}${selected || data.selected ? ' is-selected' : ''}`}
       aria-label={`Atributo ${data.label}`}
       style={{ width: 192, height: 24 }}
     >
