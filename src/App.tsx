@@ -938,6 +938,7 @@ function ExportDiagramPanel({ diagram, rf, onClose, onToast }: any) {
         viewport,
         nodes: rf.getNodes(),
         backgroundColor: getComputedStyle(shell).getPropertyValue('--canvas').trim() || LIGHT_SURFACE,
+        viewportTransform: rf.getViewport(),
       })
       if (action === 'png') await downloadDiagramPng(canvas, diagram.name)
       else if (action === 'pdf') await downloadDiagramPdf(canvas, diagram.name)

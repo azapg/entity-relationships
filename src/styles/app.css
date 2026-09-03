@@ -192,6 +192,10 @@ input:focus, select:focus { border-color: var(--ui-accent); box-shadow: 0 0 0 2p
 .app-shell.is-exporting .chen-node-toolbar,
 .app-shell.is-exporting .chen-hover-actions,
 .app-shell.is-exporting .chen-relationship-handle { display: none !important; }
+.app-shell.is-exporting .chen-node__label {
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
 .app-shell.is-exporting .chen-node.is-selected .chen-entity-node,
 .app-shell.is-exporting .chen-entity-node.is-selected { box-shadow: none; }
 .app-shell.is-exporting .chen-relationship-node.is-selected .chen-relationship-node__diamond polygon { stroke-width: var(--stroke-width, 1.35px); }
