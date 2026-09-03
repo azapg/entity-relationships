@@ -2,7 +2,7 @@
 
 Editor conceptual de diagramas entidad–relación de Nightingale, con notación académica tipo Chen. El diagrama semántico es la fuente de verdad; React Flow solo representa su proyección visual.
 
-La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, temas, persistencia local y undo/redo.
+La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, temas, persistencia local, undo/redo y exportación del diagrama completo como PNG, PDF o imagen en el portapapeles.
 
 ## Arquitectura
 

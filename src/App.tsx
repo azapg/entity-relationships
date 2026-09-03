@@ -17,7 +17,7 @@ import {
 import {
   Plus, Undo2, Redo2, Maximize, Type, Link2, Pencil,
   Trash2, Check, ChevronDown, ChevronRight, KeyRound, SquareDashed,
-  FilePlus2, LayoutList, Settings,
+  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy,
 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
@@ -32,8 +32,15 @@ import { GRID_SIZE } from './domain/layout'
 import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
 import { relationshipHandleSide } from './renderers/chen-stem/handles'
 import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
+import {
+  captureDiagramCanvas,
+  copyDiagramImage,
+  DiagramExportError,
+  downloadDiagramPdf,
+  downloadDiagramPng,
+} from './platform/exportDiagram'
 
-type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'menu' | 'library' | null
+type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'menu' | 'library' | 'export' | null
 
 const BRAND_MARK_URL = "/brand/nightingale-mark.svg"
 const REACT_FLOW_LABELS = {
@@ -643,6 +650,7 @@ function EditorApp() {
       <div className="top-actions">
         <button className="icon-button" disabled={!canUndo} onClick={store.undo} aria-label="Deshacer" title="Deshacer (⌘/Ctrl+Z)"><Undo2 size={18} /></button>
         <button className="icon-button" disabled={!canRedo} onClick={store.redo} aria-label="Rehacer" title="Rehacer (⌘/Ctrl+Shift+Z)"><Redo2 size={18} /></button>
+        <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('export') }} aria-label="Exportar diagrama" title="Exportar diagrama"><Download size={18} /></button>
         <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('menu') }} aria-label="Ajustes" title="Ajustes del diagrama"><Settings size={18} /></button>
       </div>
     </header>
@@ -658,6 +666,7 @@ function EditorApp() {
       {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} draft={draftRelationshipId === selectedRelationship.id} store={store} onDone={finishRelationshipEdit} />}
       {sheet === 'cardinality' && selectedRelationship && <CardinalityEditor relationship={selectedRelationship} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'library' && <DiagramLibrary currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onCreate={createNewDiagram} />}
+      {sheet === 'export' && <ExportDiagramPanel diagram={diagram} rf={rf} onClose={() => setSheet(null)} onToast={setToast} />}
       {sheet === 'menu' && <DiagramMenu diagram={diagram} view={diagram.view} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
     </DialogScreen>}
   </main>
@@ -907,6 +916,72 @@ function DiagramMenu({ diagram, view, store, onClose, onToast }: any) {
   return <div className="menu-stack dialog-stack"><form onSubmit={rename} className="form-stack dialog-form"><label>Nombre del diagrama<EditorTextInput value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="shortcut-list" aria-label="Atajos de teclado"><p className="section-kicker">Atajos de teclado</p><div><kbd>E</kbd><span>Nueva entidad</span><kbd>A</kbd><span>Atributo</span></div><div><kbd>R</kbd><span>Relación</span><kbd>Enter</kbd><span>Renombrar</span></div><div><kbd>F</kbd><span>Ajustar vista</span><kbd>⌘/Ctrl Z</kbd><span>Deshacer</span></div></div><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button><div className="menu-divider" /><AppearanceEditor view={view} store={store} onDone={onClose} /></div>
 }
 
+type ExportAction = 'png' | 'pdf' | 'copy'
+
+function ExportDiagramPanel({ diagram, rf, onClose, onToast }: any) {
+  const [activeAction, setActiveAction] = useState<ExportAction>()
+  const empty = diagram.entities.length === 0 && diagram.relationships.length === 0
+
+  const runExport = async (action: ExportAction) => {
+    if (activeAction) return
+    const viewport = document.querySelector<HTMLElement>('.react-flow__viewport')
+    const shell = document.querySelector<HTMLElement>('.app-shell')
+    if (!viewport || !shell) {
+      onToast('No se pudo encontrar el diagrama para exportarlo')
+      return
+    }
+
+    setActiveAction(action)
+    shell.classList.add('is-exporting')
+    try {
+      const canvas = await captureDiagramCanvas({
+        viewport,
+        nodes: rf.getNodes(),
+        backgroundColor: getComputedStyle(shell).getPropertyValue('--canvas').trim() || LIGHT_SURFACE,
+      })
+      if (action === 'png') await downloadDiagramPng(canvas, diagram.name)
+      else if (action === 'pdf') await downloadDiagramPdf(canvas, diagram.name)
+      else await copyDiagramImage(canvas)
+      onClose()
+      onToast(action === 'copy' ? 'Imagen copiada al portapapeles' : `${action.toUpperCase()} exportado`)
+    } catch (error) {
+      const message = error instanceof DiagramExportError
+        ? error.message
+        : action === 'copy'
+          ? 'No se pudo copiar la imagen. Revisa los permisos del portapapeles.'
+          : 'No se pudo exportar el diagrama.'
+      onToast(message)
+    } finally {
+      shell.classList.remove('is-exporting')
+      setActiveAction(undefined)
+    }
+  }
+
+  const workingLabel = activeAction === 'copy' ? 'Copiando imagen…' : `Preparando ${activeAction?.toUpperCase()}…`
+  return <div className="export-stack dialog-stack">
+    <p className="export-intro">Exporta el diagrama completo. El encuadre incluye todos los elementos aunque estén fuera de la vista actual.</p>
+    <div className="export-actions">
+      <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('png')}>
+        <span className="export-action-icon" aria-hidden="true"><FileImage size={20} /></span>
+        <span><strong>Descargar PNG</strong><small>Imagen nítida con el fondo del tema</small></span>
+        <Download size={17} aria-hidden="true" />
+      </button>
+      <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('pdf')}>
+        <span className="export-action-icon" aria-hidden="true"><FileText size={20} /></span>
+        <span><strong>Descargar PDF</strong><small>Página A4 lista para imprimir o compartir</small></span>
+        <Download size={17} aria-hidden="true" />
+      </button>
+      <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('copy')}>
+        <span className="export-action-icon" aria-hidden="true"><Copy size={20} /></span>
+        <span><strong>Copiar como imagen</strong><small>Pega el PNG en documentos o mensajes</small></span>
+        <Copy size={17} aria-hidden="true" />
+      </button>
+    </div>
+    {empty && <p className="export-status" role="status">Añade al menos una entidad antes de exportar.</p>}
+    {activeAction && <p className="export-status" role="status">{workingLabel}</p>}
+  </div>
+}
+
 function customStyle(theme?: CustomTheme): React.CSSProperties | undefined {
   if (!theme) return undefined
   return { '--custom-bg': theme.background, '--custom-entity': theme.entity, '--custom-relationship': theme.relationship, '--custom-ink': theme.ink, '--custom-font': theme.font === 'serif' ? 'Newsreader, Georgia, serif' : 'Host Grotesk, system-ui, sans-serif' } as React.CSSProperties
@@ -918,6 +993,7 @@ function sheetTitle(sheet: SheetName, entity: any, relationship: any) {
   if (sheet === 'relationship') return 'Nueva relación'
   if (sheet === 'relationshipEdit') return 'Editar relación'
   if (sheet === 'cardinality') return 'Cardinalidades'
+  if (sheet === 'export') return 'Exportar diagrama'
   return 'Ajustes del diagrama'
 }
 
