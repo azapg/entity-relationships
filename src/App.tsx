@@ -17,14 +17,17 @@ import {
 import {
   Plus, Undo2, Redo2, Maximize, Type, Link2, Pencil,
   Trash2, Check, ChevronDown, ChevronRight, KeyRound, SquareDashed,
-  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy, FileJson, Upload,
+  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy, FileJson, Upload, Share2,
 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
 import { DialogScreen } from './components/DialogScreen'
+import { NotificationStack } from './components/Notifications'
 import { EditorTextInput } from './components/EditorTextInput'
 import { useDiagramStore } from './domain/store'
 import { setSystemTheme } from './platform/systemBars'
+import { isNativePlatform } from './platform/capacitor'
+import { notify, notifyError, notifyFileSaved } from './platform/notifications'
 import { describeCardinality, parseCardinalityLabel } from './domain/cardinality'
 import type { Cardinality, CustomTheme, Diagram, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
@@ -34,6 +37,7 @@ import { relationshipHandleSide } from './renderers/chen-stem/handles'
 import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
 import {
   captureDiagramCanvas,
+  copyActionLabel,
   copyDiagramImage,
   DiagramExportError,
   downloadDiagramJson,
@@ -428,7 +432,7 @@ function EditorApp() {
   const rf = useReactFlow()
   const [sheet, setSheet] = useState<SheetName>(null)
   const [selectorOpen, setSelectorOpen] = useState(false)
-  const [toast, setToast] = useState('')
+  const showToast = useCallback((title: string) => notify(title), [])
   const [draftEntityId, setDraftEntityId] = useState<string>()
   const [draftRelationshipId, setDraftRelationshipId] = useState<string>()
   const [pendingRelationshipRename, setPendingRelationshipRename] = useState<string>()
@@ -606,8 +610,6 @@ function EditorApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [closeSheet, deleteTarget, rf, selection, selectorOpen, sheet, startEntityCreation, store])
 
-  useEffect(() => { if (toast) { const t = window.setTimeout(() => setToast(''), 2400); return () => window.clearTimeout(t) } }, [toast])
-
   useEffect(() => {
     if (!selectorOpen) return
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -660,7 +662,7 @@ function EditorApp() {
     <CanvasViewport diagram={diagram} selection={selection} onSelect={setSelection} onMove={store.setPosition} onEdit={openNodeEdit} actionsFor={actionsFor} onRelationshipGesture={handleRelationshipGesture} />
     {!selection && <button className="fab" onClick={startEntityCreation} aria-label="Crear entidad" title="Crear entidad (E)"><Plus size={27} /><span>Nueva entidad</span></button>}
     {selection && <ContextBar selection={selection} onAction={setSheet} onDelete={deleteSelected} />}
-    {toast && <div className="toast">{toast}</div>}
+    <NotificationStack />
     {sheet && <DialogScreen title={sheetTitle(sheet, selectedEntity, selectedRelationship)} onClose={closeSheet}>
       {sheet === 'entity' && <EntityForm entity={selectedEntity} draft={draftEntityId === selectedEntity?.id} onDone={finishEntityEdit} store={store} />}
       {sheet === 'attribute' && <AttributeEditor ownerType={selectedEntity ? 'entity' : 'relationship'} owner={selectedEntity ?? selectedRelationship} onDone={() => setSheet(null)} store={store} />}
@@ -668,8 +670,8 @@ function EditorApp() {
       {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} draft={draftRelationshipId === selectedRelationship.id} store={store} onDone={finishRelationshipEdit} />}
       {sheet === 'cardinality' && selectedRelationship && <CardinalityEditor relationship={selectedRelationship} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'library' && <DiagramLibrary currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onCreate={createNewDiagram} />}
-      {sheet === 'export' && <ExportDiagramPanel diagram={diagram} rf={rf} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
-      {sheet === 'menu' && <DiagramMenu diagram={diagram} view={diagram.view} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
+      {sheet === 'export' && <ExportDiagramPanel diagram={diagram} rf={rf} store={store} onClose={() => setSheet(null)} onToast={showToast} />}
+      {sheet === 'menu' && <DiagramMenu diagram={diagram} view={diagram.view} store={store} onClose={() => setSheet(null)} onToast={showToast} />}
     </DialogScreen>}
   </main>
 }
@@ -924,10 +926,21 @@ function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
   const [activeAction, setActiveAction] = useState<ExportAction>()
   const importInput = useRef<HTMLInputElement>(null)
   const empty = diagram.entities.length === 0 && diagram.relationships.length === 0
+  const native = isNativePlatform()
+  const copyLabels = copyActionLabel()
 
-  const exportJson = () => {
-    downloadDiagramJson(diagram)
-    onToast('JSON exportado')
+  const exportJson = async () => {
+    try {
+      const result = await downloadDiagramJson(diagram)
+      onClose()
+      if (result.destination === 'documents') {
+        notifyFileSaved(result, { title: 'JSON guardado', message: result.fileName })
+      } else {
+        onToast('JSON exportado')
+      }
+    } catch {
+      notifyError('No se pudo exportar el JSON.')
+    }
   }
 
   const importJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -935,7 +948,7 @@ function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
     event.target.value = ''
     if (!file) return
     if (file.size > MAX_DIAGRAM_FILE_BYTES) {
-      onToast('El archivo es demasiado grande. El máximo es 5 MB.')
+      notifyError('El archivo es demasiado grande.', 'El máximo es 5 MB.')
       return
     }
     try {
@@ -944,7 +957,7 @@ function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
       onClose()
       onToast(`“${imported.name}” importado`)
     } catch (error) {
-      onToast(error instanceof DiagramImportError ? error.message : 'No se pudo leer el archivo JSON.')
+      notifyError(error instanceof DiagramImportError ? error.message : 'No se pudo leer el archivo JSON.')
     }
   }
 
@@ -953,7 +966,7 @@ function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
     const viewport = document.querySelector<HTMLElement>('.react-flow__viewport')
     const shell = document.querySelector<HTMLElement>('.app-shell')
     if (!viewport || !shell) {
-      onToast('No se pudo encontrar el diagrama para exportarlo')
+      notifyError('No se pudo encontrar el diagrama para exportarlo')
       return
     }
 
@@ -966,32 +979,60 @@ function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
         backgroundColor: getComputedStyle(shell).getPropertyValue('--canvas').trim() || LIGHT_SURFACE,
         viewportTransform: rf.getViewport(),
       })
-      if (action === 'png') await downloadDiagramPng(canvas, diagram.name)
-      else if (action === 'pdf') await downloadDiagramPdf(canvas, diagram.name)
-      else await copyDiagramImage(canvas)
-      onClose()
-      onToast(action === 'copy' ? 'Imagen copiada al portapapeles' : `${action.toUpperCase()} exportado`)
+      if (action === 'png') {
+        const result = await downloadDiagramPng(canvas, diagram.name)
+        onClose()
+        if (result.destination === 'documents') {
+          notifyFileSaved(result, { title: 'PNG guardado', message: result.fileName })
+        } else {
+          onToast('PNG exportado')
+        }
+      } else if (action === 'pdf') {
+        const result = await downloadDiagramPdf(canvas, diagram.name)
+        onClose()
+        if (result.destination === 'documents') {
+          notifyFileSaved(result, { title: 'PDF guardado', message: result.fileName })
+        } else {
+          onToast('PDF exportado')
+        }
+      } else {
+        const outcome = await copyDiagramImage(canvas, diagram.name)
+        onClose()
+        if (outcome.copied) {
+          onToast('Imagen copiada al portapapeles')
+        } else {
+          notifyFileSaved(outcome.sharedFile, {
+            title: outcome.sharedFile.shared ? 'Imagen compartida' : 'Imagen guardada',
+            message: outcome.sharedFile.fileName,
+          })
+        }
+      }
     } catch (error) {
       const message = error instanceof DiagramExportError
         ? error.message
         : action === 'copy'
-          ? 'No se pudo copiar la imagen. Revisa los permisos del portapapeles.'
+          ? native
+            ? 'No se pudo guardar la imagen. Revisa el almacenamiento disponible.'
+            : 'No se pudo copiar la imagen. Revisa los permisos del portapapeles.'
           : 'No se pudo exportar el diagrama.'
-      onToast(message)
+      notifyError(message)
     } finally {
       shell.classList.remove('is-exporting')
       setActiveAction(undefined)
     }
   }
 
-  const workingLabel = activeAction === 'copy' ? 'Copiando imagen…' : `Preparando ${activeAction?.toUpperCase()}…`
+  const workingLabel = activeAction === 'copy'
+    ? native ? 'Preparando imagen…' : 'Copiando imagen…'
+    : `Preparando ${activeAction?.toUpperCase()}…`
   return <div className="export-stack dialog-stack">
     <p className="export-intro">Comparte un archivo JSON editable con tus compañeros o exporta una copia visual del diagrama completo.</p>
+    {native && <p className="export-status" role="note">En Android los archivos se guardan en Documentos/Nightingale Schema y puedes compartirlos desde la notificación.</p>}
     <div className="export-actions">
       <button type="button" className="export-action" disabled={Boolean(activeAction)} onClick={exportJson}>
         <span className="export-action-icon" aria-hidden="true"><FileJson size={20} /></span>
-        <span><strong>Exportar JSON editable</strong><small>Incluye entidades, relaciones, posiciones y tema</small></span>
-        <Download size={17} aria-hidden="true" />
+        <span><strong>{native ? 'Guardar JSON editable' : 'Exportar JSON editable'}</strong><small>Incluye entidades, relaciones, posiciones y tema</small></span>
+        {native ? <Share2 size={17} aria-hidden="true" /> : <Download size={17} aria-hidden="true" />}
       </button>
       <button type="button" className="export-action" disabled={Boolean(activeAction)} onClick={() => importInput.current?.click()}>
         <span className="export-action-icon" aria-hidden="true"><Upload size={20} /></span>
@@ -1002,18 +1043,18 @@ function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
       <div className="menu-divider" />
       <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('png')}>
         <span className="export-action-icon" aria-hidden="true"><FileImage size={20} /></span>
-        <span><strong>Descargar PNG</strong><small>Imagen nítida con el fondo del tema</small></span>
-        <Download size={17} aria-hidden="true" />
+        <span><strong>{native ? 'Guardar PNG' : 'Descargar PNG'}</strong><small>Imagen nítida con el fondo del tema</small></span>
+        {native ? <Share2 size={17} aria-hidden="true" /> : <Download size={17} aria-hidden="true" />}
       </button>
       <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('pdf')}>
         <span className="export-action-icon" aria-hidden="true"><FileText size={20} /></span>
-        <span><strong>Descargar PDF</strong><small>Página A4 lista para imprimir o compartir</small></span>
-        <Download size={17} aria-hidden="true" />
+        <span><strong>{native ? 'Guardar PDF' : 'Descargar PDF'}</strong><small>Página A4 lista para imprimir o compartir</small></span>
+        {native ? <Share2 size={17} aria-hidden="true" /> : <Download size={17} aria-hidden="true" />}
       </button>
       <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('copy')}>
-        <span className="export-action-icon" aria-hidden="true"><Copy size={20} /></span>
-        <span><strong>Copiar como imagen</strong><small>Pega el PNG en documentos o mensajes</small></span>
-        <Copy size={17} aria-hidden="true" />
+        <span className="export-action-icon" aria-hidden="true">{native ? <Share2 size={20} /> : <Copy size={20} />}</span>
+        <span><strong>{copyLabels.title}</strong><small>{copyLabels.hint}</small></span>
+        {native ? <Share2 size={17} aria-hidden="true" /> : <Copy size={17} aria-hidden="true" />}
       </button>
     </div>
     {empty && <p className="export-status" role="status">Añade al menos una entidad antes de exportar.</p>}

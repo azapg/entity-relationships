@@ -1,6 +1,7 @@
 import { getNodesBounds, type Node } from '@xyflow/react'
 import { serializeDiagramFile } from '../domain/diagramTransfer'
 import type { Diagram } from '../domain/types'
+import { isNativePlatform } from './capacitor'
 
 const EXPORT_PADDING = 64
 const MAX_BITMAP_EDGE = 4096
@@ -167,7 +168,50 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
   })
 }
 
-function downloadBlob(blob: Blob, fileName: string) {
+export type DiagramFileDestination = 'download' | 'documents'
+
+export type DiagramFileResult = {
+  fileName: string
+  destination: DiagramFileDestination
+  /** User-facing location, e.g. "Descargas" on web or "Documentos/…" on native. */
+  locationLabel: string
+  /** Native file URI (content://…) when saved through Capacitor Filesystem. */
+  uri?: string
+  shared: boolean
+}
+
+function webDownloadResult(fileName: string): DiagramFileResult {
+  return { fileName, destination: 'download', locationLabel: 'Descargas', shared: false }
+}
+
+/**
+ * Anchor downloads (blob: URLs + a[download]) silently do nothing inside the
+ * Capacitor Android WebView, and jsPDF.save() relies on the same mechanism.
+ * On native, persist through the Filesystem plugin so the file lands in a
+ * user-visible folder, then let the caller surface the location + share sheet.
+ */
+async function persistBlob(blob: Blob, fileName: string): Promise<DiagramFileResult> {
+  if (isNativePlatform()) {
+    const { saveBlobToDocuments } = await import('./nativeFiles')
+    try {
+      const saved = await saveBlobToDocuments(blob, fileName)
+      return {
+        fileName: saved.fileName,
+        destination: 'documents',
+        locationLabel: saved.locationLabel,
+        uri: saved.uri,
+        shared: false,
+      }
+    } catch (error) {
+      if (error instanceof Error && /permiso|permission/i.test(error.message)) {
+        throw new DiagramExportError('Sin permiso para guardar en Documentos. Revisa los permisos de la app.')
+      }
+      throw error instanceof DiagramExportError
+        ? error
+        : new DiagramExportError('No se pudo guardar el archivo en el dispositivo.')
+    }
+  }
+
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -177,20 +221,36 @@ function downloadBlob(blob: Blob, fileName: string) {
   link.click()
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return webDownloadResult(fileName)
 }
 
-export function downloadDiagramJson(diagram: Diagram) {
-  downloadBlob(
+/** Open the OS share sheet for a file that was just saved on native. */
+export async function shareExportedFile(result: DiagramFileResult, title: string): Promise<boolean> {
+  if (!result.uri) return false
+  const { shareSavedFile } = await import('./nativeFiles')
+  const shared = await shareSavedFile(result.uri, title)
+  if (shared) result.shared = true
+  return shared
+}
+
+export async function downloadDiagramJson(diagram: Diagram): Promise<DiagramFileResult> {
+  return persistBlob(
     new Blob([serializeDiagramFile(diagram)], { type: 'application/json;charset=utf-8' }),
     diagramFileName(diagram.name, 'json'),
   )
 }
 
-export async function downloadDiagramPng(canvas: HTMLCanvasElement, diagramName: string) {
-  downloadBlob(await canvasToBlob(canvas), diagramFileName(diagramName, 'png'))
+export async function downloadDiagramPng(
+  canvas: HTMLCanvasElement,
+  diagramName: string,
+): Promise<DiagramFileResult> {
+  return persistBlob(await canvasToBlob(canvas), diagramFileName(diagramName, 'png'))
 }
 
-export async function downloadDiagramPdf(canvas: HTMLCanvasElement, diagramName: string) {
+export async function downloadDiagramPdf(
+  canvas: HTMLCanvasElement,
+  diagramName: string,
+): Promise<DiagramFileResult> {
   const { jsPDF } = await import('jspdf')
   const landscape = canvas.width >= canvas.height
   const pdf = new jsPDF({
@@ -209,13 +269,57 @@ export async function downloadDiagramPdf(canvas: HTMLCanvasElement, diagramName:
   const width = canvas.width * scale
   const height = canvas.height * scale
   pdf.addImage(canvas, 'PNG', (pageWidth - width) / 2, (pageHeight - height) / 2, width, height, undefined, 'FAST')
-  pdf.save(diagramFileName(diagramName, 'pdf'))
+  const fileName = diagramFileName(diagramName, 'pdf')
+  if (isNativePlatform()) {
+    const pdfBlob = pdf.output('blob') as Blob
+    return persistBlob(pdfBlob, fileName)
+  }
+  pdf.save(fileName)
+  return webDownloadResult(fileName)
 }
 
-export async function copyDiagramImage(canvas: HTMLCanvasElement) {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+export type CopyImageOutcome =
+  | { copied: true; sharedFile?: undefined }
+  | { copied: false; sharedFile: DiagramFileResult }
+
+/**
+ * The Android WebView rarely grants image clipboard writes (missing
+ * ClipboardItem support or denied clipboard permission). Try the clipboard
+ * first, then fall back to saving the PNG and opening the share sheet so the
+ * user can still send the image anywhere.
+ */
+export async function copyDiagramImage(
+  canvas: HTMLCanvasElement,
+  diagramName = 'diagrama',
+): Promise<CopyImageOutcome> {
+  const canUseClipboard = typeof navigator !== 'undefined'
+    && Boolean(navigator.clipboard?.write)
+    && typeof ClipboardItem !== 'undefined'
+  if (canUseClipboard) {
+    try {
+      const blob = await canvasToBlob(canvas)
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+      return { copied: true }
+    } catch (error) {
+      if (!isNativePlatform()) throw error
+      // On native, fall through to the save + share fallback below.
+    }
+  } else if (!isNativePlatform()) {
     throw new DiagramExportError('Este navegador no permite copiar imágenes al portapapeles.')
   }
-  const blob = await canvasToBlob(canvas)
-  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+
+  const saved = await persistBlob(await canvasToBlob(canvas), diagramFileName(diagramName, 'png'))
+  await shareExportedFile(saved, 'Compartir imagen del diagrama')
+  return { copied: false, sharedFile: saved }
+}
+
+/** On native the clipboard fallback shares the file, so label the action honestly. */
+export function copyActionLabel(): { title: string; hint: string } {
+  if (isNativePlatform()) {
+    return {
+      title: 'Compartir como imagen',
+      hint: 'Guarda el PNG y abre el menú para enviarlo',
+    }
+  }
+  return { title: 'Copiar como imagen', hint: 'Pega el PNG en documentos o mensajes' }
 }

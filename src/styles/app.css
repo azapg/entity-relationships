@@ -229,6 +229,22 @@ input:focus, select:focus { border-color: var(--ui-accent); box-shadow: 0 0 0 2p
 .color-fields label { font-size: 10px; align-items: center; } .color-fields input[type='color'] { width: 100%; height: 31px; border: 0; background: transparent; padding: 0; cursor: pointer; }
 .font-select { margin-top: -4px; }
 .toast { position: fixed; z-index: 20; left: 50%; bottom: 88px; transform: translateX(-50%); padding: 9px 13px; color: #fbf9f4; background: var(--ui-text); border-radius: 4px; font-size: 12px; box-shadow: var(--ui-shadow); }
+.notification-stack { position: fixed; z-index: 30; left: 50%; bottom: 88px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 24px)); }
+.notification { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 11px 12px; color: var(--ui-text); background: var(--ui-raised); border: 1px solid var(--ui-border-strong); border-radius: 8px; box-shadow: var(--ui-shadow); animation: notification-in .18s ease-out; }
+.notification--success .notification-icon { color: #2f7a3d; }
+.notification--error { border-color: #b3261e; }
+.notification--error .notification-icon { color: #b3261e; }
+.notification--info .notification-icon { color: var(--ui-accent); }
+.notification-icon { display: grid; place-items: center; margin-top: 1px; }
+.notification-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.4; }
+.notification-copy strong { font-size: 13px; font-weight: 600; }
+.notification-copy span { color: var(--ui-text); overflow-wrap: anywhere; }
+.notification-location { color: var(--ui-muted); font-size: 11px; overflow-wrap: anywhere; }
+.notification-actions { display: flex; gap: 8px; margin-top: 6px; }
+.notification-action { padding: 6px 12px; color: #fbf9f4; background: var(--ui-text); border: 0; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.notification-close { display: grid; place-items: center; width: 26px; height: 26px; color: var(--ui-muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.notification-close:hover { color: var(--ui-text); background: var(--ui-sunken); }
+@keyframes notification-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .loading { display: grid; place-items: center; min-height: 100dvh; color: #6b6353; background: #fbf9f4; }
 @media (max-width: 699px) {
   .dialog-backdrop { align-items: stretch; background: var(--ui-bg); }

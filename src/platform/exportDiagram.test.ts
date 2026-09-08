@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { diagramFileName } from './exportDiagram'
+import { describe, expect, it, vi } from 'vitest'
+import { copyActionLabel, diagramFileName } from './exportDiagram'
+
+vi.mock('./capacitor', () => ({
+  isNativePlatform: () => false,
+  nativePlatformName: () => 'web' as const,
+}))
 
 describe('diagramFileName', () => {
   it('creates a filesystem-friendly name', () => {
@@ -12,5 +17,11 @@ describe('diagramFileName', () => {
 
   it('uses the same safe naming for editable JSON files', () => {
     expect(diagramFileName('Diagrama del salón', 'json')).toBe('diagrama-del-salon.json')
+  })
+})
+
+describe('copyActionLabel', () => {
+  it('offers clipboard copy on web', () => {
+    expect(copyActionLabel().title).toBe('Copiar como imagen')
   })
 })
