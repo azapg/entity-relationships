@@ -72,6 +72,7 @@ export type DiagramStore = {
   setSelection: (selection: SemanticSelection) => void
   openDiagram: (id: string) => boolean
   createDiagram: () => string
+  importDiagram: (diagram: Diagram) => string
   setDiagramName: (name: string) => void
   createEntity: (name: string, kind?: Entity['kind'], position?: Point) => string
   renameEntity: (id: string, name: string) => void
@@ -441,6 +442,25 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
 
     createDiagram: () => {
       const next = createBlankDiagram()
+      const diagrams = putDiagramFirst(get().diagrams, next)
+      set({
+        diagram: next,
+        diagrams,
+        selection: null,
+        past: [],
+        future: [],
+        canUndo: false,
+        canRedo: false,
+      })
+      persistDiagrams(diagrams)
+      return next.id
+    },
+
+    importDiagram: (diagram) => {
+      // An imported file is a new library item. Giving the root diagram a new
+      // identity prevents a classmate's file from replacing local work that
+      // happened to originate from the same shared file.
+      const next = normalizeDiagram(cloneDiagram({ ...diagram, id: makeId('diagram') }))
       const diagrams = putDiagramFirst(get().diagrams, next)
       set({
         diagram: next,

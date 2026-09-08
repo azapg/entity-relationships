@@ -96,6 +96,22 @@ describe('modelo semántico del diagrama', () => {
     }
   })
 
+  it('imports a shared diagram as a distinct library item', () => {
+    const localId = state().diagram.id
+    const shared = createSampleDiagram()
+    shared.id = localId
+    shared.name = 'Modelo de mi compañera'
+
+    const importedId = state().importDiagram(shared)
+
+    expect(importedId).not.toBe(localId)
+    expect(state().diagram.id).toBe(importedId)
+    expect(state().diagram.name).toBe('Modelo de mi compañera')
+    expect(state().diagrams.some((diagram) => diagram.id === localId)).toBe(true)
+    expect(state().selection).toBeNull()
+    expect(state().canUndo).toBe(false)
+  })
+
   it('al borrar una entidad elimina sus relaciones y posiciones asociadas', () => {
     const professorId = state().createEntity('PROFESSOR')
     const courseId = state().createEntity('COURSE')

@@ -1,4 +1,6 @@
 import { getNodesBounds, type Node } from '@xyflow/react'
+import { serializeDiagramFile } from '../domain/diagramTransfer'
+import type { Diagram } from '../domain/types'
 
 const EXPORT_PADDING = 64
 const MAX_BITMAP_EDGE = 4096
@@ -17,7 +19,7 @@ export class DiagramExportError extends Error {
   }
 }
 
-export function diagramFileName(name: string, extension: 'png' | 'pdf') {
+export function diagramFileName(name: string, extension: 'png' | 'pdf' | 'json') {
   const base = name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -175,6 +177,13 @@ function downloadBlob(blob: Blob, fileName: string) {
   link.click()
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export function downloadDiagramJson(diagram: Diagram) {
+  downloadBlob(
+    new Blob([serializeDiagramFile(diagram)], { type: 'application/json;charset=utf-8' }),
+    diagramFileName(diagram.name, 'json'),
+  )
 }
 
 export async function downloadDiagramPng(canvas: HTMLCanvasElement, diagramName: string) {

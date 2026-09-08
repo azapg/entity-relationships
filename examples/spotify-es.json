@@ -1,0 +1,240 @@
+{
+  "format": "nightingale-schema",
+  "version": 1,
+  "diagram": {
+    "id": "ejemplo-spotify-es",
+    "name": "Plataforma de música",
+    "entities": [
+      {
+        "id": "usuario",
+        "name": "USUARIO",
+        "kind": "strong",
+        "attributes": [
+          { "id": "usuario-id", "name": "usuario_id", "key": true },
+          { "id": "usuario-nombre", "name": "nombre", "key": false },
+          { "id": "usuario-correo", "name": "correo_electrónico", "key": false },
+          { "id": "usuario-pais", "name": "país", "key": false },
+          { "id": "usuario-fecha", "name": "fecha_registro", "key": false }
+        ]
+      },
+      {
+        "id": "cancion",
+        "name": "CANCIÓN",
+        "kind": "strong",
+        "attributes": [
+          { "id": "cancion-id", "name": "canción_id", "key": true },
+          { "id": "cancion-titulo", "name": "título", "key": false },
+          { "id": "cancion-duracion", "name": "duración_segundos", "key": false },
+          { "id": "cancion-pista", "name": "número_pista", "key": false },
+          { "id": "cancion-explicita", "name": "es_explícita", "key": false }
+        ]
+      },
+      {
+        "id": "artista",
+        "name": "ARTISTA",
+        "kind": "strong",
+        "attributes": [
+          { "id": "artista-id", "name": "artista_id", "key": true },
+          { "id": "artista-nombre", "name": "nombre_artístico", "key": false },
+          { "id": "artista-biografia", "name": "biografía", "key": false }
+        ]
+      },
+      {
+        "id": "album",
+        "name": "ÁLBUM",
+        "kind": "strong",
+        "attributes": [
+          { "id": "album-id", "name": "álbum_id", "key": true },
+          { "id": "album-titulo", "name": "título", "key": false },
+          { "id": "album-fecha", "name": "fecha_publicación", "key": false },
+          { "id": "album-portada", "name": "url_portada", "key": false }
+        ]
+      },
+      {
+        "id": "lista",
+        "name": "LISTA_DE_REPRODUCCIÓN",
+        "kind": "strong",
+        "attributes": [
+          { "id": "lista-id", "name": "lista_id", "key": true },
+          { "id": "lista-nombre", "name": "nombre", "key": false },
+          { "id": "lista-descripcion", "name": "descripción", "key": false },
+          { "id": "lista-publica", "name": "es_pública", "key": false },
+          { "id": "lista-fecha", "name": "fecha_creación", "key": false }
+        ]
+      },
+      {
+        "id": "genero",
+        "name": "GÉNERO",
+        "kind": "strong",
+        "attributes": [
+          { "id": "genero-id", "name": "género_id", "key": true },
+          { "id": "genero-nombre", "name": "nombre", "key": false }
+        ]
+      },
+      {
+        "id": "suscripcion",
+        "name": "SUSCRIPCIÓN",
+        "kind": "strong",
+        "attributes": [
+          { "id": "suscripcion-id", "name": "suscripción_id", "key": true },
+          { "id": "suscripcion-plan", "name": "tipo_plan", "key": false },
+          { "id": "suscripcion-inicio", "name": "fecha_inicio", "key": false },
+          { "id": "suscripcion-fin", "name": "fecha_fin", "key": false },
+          { "id": "suscripcion-estado", "name": "estado", "key": false }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "id": "crea",
+        "name": "CREA",
+        "participants": [
+          { "entityId": "usuario", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "lista", "cardinality": { "min": 1, "max": 1 } }
+        ],
+        "attributes": []
+      },
+      {
+        "id": "incluye",
+        "name": "INCLUYE",
+        "participants": [
+          { "entityId": "lista", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "cancion", "cardinality": { "min": 0, "max": "n" } }
+        ],
+        "attributes": [
+          { "id": "incluye-orden", "name": "posición", "key": false },
+          { "id": "incluye-fecha", "name": "fecha_agregada", "key": false }
+        ]
+      },
+      {
+        "id": "interpreta",
+        "name": "INTERPRETA",
+        "participants": [
+          { "entityId": "artista", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "cancion", "cardinality": { "min": 1, "max": "n" } }
+        ],
+        "attributes": []
+      },
+      {
+        "id": "contiene",
+        "name": "CONTIENE",
+        "participants": [
+          { "entityId": "album", "cardinality": { "min": 1, "max": "n" } },
+          { "entityId": "cancion", "cardinality": { "min": 0, "max": 1 } }
+        ],
+        "attributes": []
+      },
+      {
+        "id": "publica",
+        "name": "PUBLICA",
+        "participants": [
+          { "entityId": "artista", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "album", "cardinality": { "min": 1, "max": "n" } }
+        ],
+        "attributes": []
+      },
+      {
+        "id": "escucha",
+        "name": "ESCUCHA",
+        "participants": [
+          { "entityId": "usuario", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "cancion", "cardinality": { "min": 0, "max": "n" } }
+        ],
+        "attributes": [
+          { "id": "escucha-fecha", "name": "fecha_y_hora", "key": false },
+          { "id": "escucha-segundos", "name": "segundos_reproducidos", "key": false },
+          { "id": "escucha-dispositivo", "name": "tipo_dispositivo", "key": false }
+        ]
+      },
+      {
+        "id": "sigue",
+        "name": "SIGUE",
+        "participants": [
+          { "entityId": "usuario", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "artista", "cardinality": { "min": 0, "max": "n" } }
+        ],
+        "attributes": [
+          { "id": "sigue-fecha", "name": "fecha_seguimiento", "key": false }
+        ]
+      },
+      {
+        "id": "clasifica",
+        "name": "CLASIFICA",
+        "participants": [
+          { "entityId": "genero", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "cancion", "cardinality": { "min": 1, "max": "n" } }
+        ],
+        "attributes": []
+      },
+      {
+        "id": "contrata",
+        "name": "CONTRATA",
+        "participants": [
+          { "entityId": "usuario", "cardinality": { "min": 0, "max": "n" } },
+          { "entityId": "suscripcion", "cardinality": { "min": 1, "max": 1 } }
+        ],
+        "attributes": []
+      }
+    ],
+    "view": {
+      "renderer": "chen-stem",
+      "theme": "warm",
+      "positions": {
+        "usuario": { "x": 0, "y": 144 },
+        "crea": { "x": 288, "y": 144 },
+        "lista": { "x": 576, "y": 0 },
+        "incluye": { "x": 864, "y": 144 },
+        "cancion": { "x": 1152, "y": 144 },
+        "interpreta": { "x": 864, "y": 432 },
+        "artista": { "x": 576, "y": 576 },
+        "contiene": { "x": 1152, "y": 432 },
+        "album": { "x": 1440, "y": 576 },
+        "publica": { "x": 1008, "y": 720 },
+        "escucha": { "x": 576, "y": 288 },
+        "sigue": { "x": 288, "y": 432 },
+        "genero": { "x": 1440, "y": 0 },
+        "clasifica": { "x": 1440, "y": 288 },
+        "suscripcion": { "x": 0, "y": 576 },
+        "contrata": { "x": 0, "y": 384 }
+      },
+      "layoutMode": "structured",
+      "attributeLayout": {
+        "usuario-id": { "side": "north" },
+        "usuario-nombre": { "side": "east" },
+        "usuario-correo": { "side": "south" },
+        "usuario-pais": { "side": "west" },
+        "usuario-fecha": { "side": "north" },
+        "cancion-id": { "side": "north" },
+        "cancion-titulo": { "side": "east" },
+        "cancion-duracion": { "side": "south" },
+        "cancion-pista": { "side": "west" },
+        "cancion-explicita": { "side": "north" },
+        "artista-id": { "side": "north" },
+        "artista-nombre": { "side": "east" },
+        "artista-biografia": { "side": "south" },
+        "album-id": { "side": "north" },
+        "album-titulo": { "side": "east" },
+        "album-fecha": { "side": "south" },
+        "album-portada": { "side": "west" },
+        "lista-id": { "side": "north" },
+        "lista-nombre": { "side": "east" },
+        "lista-descripcion": { "side": "south" },
+        "lista-publica": { "side": "west" },
+        "lista-fecha": { "side": "north" },
+        "genero-id": { "side": "north" },
+        "genero-nombre": { "side": "south" },
+        "suscripcion-id": { "side": "north" },
+        "suscripcion-plan": { "side": "east" },
+        "suscripcion-inicio": { "side": "south" },
+        "suscripcion-fin": { "side": "west" },
+        "suscripcion-estado": { "side": "north" },
+        "incluye-orden": { "side": "north" },
+        "incluye-fecha": { "side": "south" },
+        "escucha-fecha": { "side": "north" },
+        "escucha-segundos": { "side": "east" },
+        "escucha-dispositivo": { "side": "south" },
+        "sigue-fecha": { "side": "north" }
+      }
+    }
+  }
+}

@@ -9,4 +9,8 @@ describe('diagramFileName', () => {
   it('uses a fallback for an empty name', () => {
     expect(diagramFileName('   ', 'pdf')).toBe('diagrama.pdf')
   })
+
+  it('uses the same safe naming for editable JSON files', () => {
+    expect(diagramFileName('Diagrama del salón', 'json')).toBe('diagrama-del-salon.json')
+  })
 })
