@@ -17,7 +17,7 @@ import {
 import {
   Plus, Undo2, Redo2, Maximize, Type, Link2, Pencil,
   Trash2, Check, ChevronDown, ChevronRight, KeyRound, SquareDashed,
-  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy,
+  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy, FileJson, Upload,
 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
@@ -36,9 +36,11 @@ import {
   captureDiagramCanvas,
   copyDiagramImage,
   DiagramExportError,
+  downloadDiagramJson,
   downloadDiagramPdf,
   downloadDiagramPng,
 } from './platform/exportDiagram'
+import { DiagramImportError, MAX_DIAGRAM_FILE_BYTES, parseDiagramFile } from './domain/diagramTransfer'
 
 type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'menu' | 'library' | 'export' | null
 
@@ -650,7 +652,7 @@ function EditorApp() {
       <div className="top-actions">
         <button className="icon-button" disabled={!canUndo} onClick={store.undo} aria-label="Deshacer" title="Deshacer (⌘/Ctrl+Z)"><Undo2 size={18} /></button>
         <button className="icon-button" disabled={!canRedo} onClick={store.redo} aria-label="Rehacer" title="Rehacer (⌘/Ctrl+Shift+Z)"><Redo2 size={18} /></button>
-        <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('export') }} aria-label="Exportar diagrama" title="Exportar diagrama"><Download size={18} /></button>
+        <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('export') }} aria-label="Compartir o importar diagrama" title="Compartir o importar diagrama"><Download size={18} /></button>
         <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('menu') }} aria-label="Ajustes" title="Ajustes del diagrama"><Settings size={18} /></button>
       </div>
     </header>
@@ -666,7 +668,7 @@ function EditorApp() {
       {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} draft={draftRelationshipId === selectedRelationship.id} store={store} onDone={finishRelationshipEdit} />}
       {sheet === 'cardinality' && selectedRelationship && <CardinalityEditor relationship={selectedRelationship} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'library' && <DiagramLibrary currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onCreate={createNewDiagram} />}
-      {sheet === 'export' && <ExportDiagramPanel diagram={diagram} rf={rf} onClose={() => setSheet(null)} onToast={setToast} />}
+      {sheet === 'export' && <ExportDiagramPanel diagram={diagram} rf={rf} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
       {sheet === 'menu' && <DiagramMenu diagram={diagram} view={diagram.view} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
     </DialogScreen>}
   </main>
@@ -918,9 +920,33 @@ function DiagramMenu({ diagram, view, store, onClose, onToast }: any) {
 
 type ExportAction = 'png' | 'pdf' | 'copy'
 
-function ExportDiagramPanel({ diagram, rf, onClose, onToast }: any) {
+function ExportDiagramPanel({ diagram, rf, store, onClose, onToast }: any) {
   const [activeAction, setActiveAction] = useState<ExportAction>()
+  const importInput = useRef<HTMLInputElement>(null)
   const empty = diagram.entities.length === 0 && diagram.relationships.length === 0
+
+  const exportJson = () => {
+    downloadDiagramJson(diagram)
+    onToast('JSON exportado')
+  }
+
+  const importJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > MAX_DIAGRAM_FILE_BYTES) {
+      onToast('El archivo es demasiado grande. El máximo es 5 MB.')
+      return
+    }
+    try {
+      const imported = parseDiagramFile(await file.text())
+      store.importDiagram(imported)
+      onClose()
+      onToast(`“${imported.name}” importado`)
+    } catch (error) {
+      onToast(error instanceof DiagramImportError ? error.message : 'No se pudo leer el archivo JSON.')
+    }
+  }
 
   const runExport = async (action: ExportAction) => {
     if (activeAction) return
@@ -960,8 +986,20 @@ function ExportDiagramPanel({ diagram, rf, onClose, onToast }: any) {
 
   const workingLabel = activeAction === 'copy' ? 'Copiando imagen…' : `Preparando ${activeAction?.toUpperCase()}…`
   return <div className="export-stack dialog-stack">
-    <p className="export-intro">Exporta el diagrama completo. El encuadre incluye todos los elementos aunque estén fuera de la vista actual.</p>
+    <p className="export-intro">Comparte un archivo JSON editable con tus compañeros o exporta una copia visual del diagrama completo.</p>
     <div className="export-actions">
+      <button type="button" className="export-action" disabled={Boolean(activeAction)} onClick={exportJson}>
+        <span className="export-action-icon" aria-hidden="true"><FileJson size={20} /></span>
+        <span><strong>Exportar JSON editable</strong><small>Incluye entidades, relaciones, posiciones y tema</small></span>
+        <Download size={17} aria-hidden="true" />
+      </button>
+      <button type="button" className="export-action" disabled={Boolean(activeAction)} onClick={() => importInput.current?.click()}>
+        <span className="export-action-icon" aria-hidden="true"><Upload size={20} /></span>
+        <span><strong>Importar JSON</strong><small>Añade el archivo como un diagrama nuevo</small></span>
+        <Upload size={17} aria-hidden="true" />
+      </button>
+      <input ref={importInput} hidden type="file" accept="application/json,.json" onChange={importJson} aria-label="Seleccionar archivo JSON para importar" />
+      <div className="menu-divider" />
       <button type="button" className="export-action" disabled={empty || Boolean(activeAction)} onClick={() => runExport('png')}>
         <span className="export-action-icon" aria-hidden="true"><FileImage size={20} /></span>
         <span><strong>Descargar PNG</strong><small>Imagen nítida con el fondo del tema</small></span>
@@ -994,7 +1032,7 @@ function sheetTitle(sheet: SheetName, entity: any, relationship: any) {
   if (sheet === 'relationship') return 'Nueva relación'
   if (sheet === 'relationshipEdit') return 'Editar relación'
   if (sheet === 'cardinality') return 'Cardinalidades'
-  if (sheet === 'export') return 'Exportar diagrama'
+  if (sheet === 'export') return 'Compartir diagrama'
   return 'Ajustes del diagrama'
 }
 
