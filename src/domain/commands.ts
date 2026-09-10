@@ -1,6 +1,7 @@
 import type {
   Attribute,
   Cardinality,
+  CardinalityPlacement,
   Diagram,
   Entity,
   Participant,
@@ -382,6 +383,14 @@ export const setDiagramTheme = (
 ): Diagram => ({
   ...diagram,
   view: { ...diagram.view, theme },
+})
+
+export const setCardinalityPlacement = (
+  diagram: Diagram,
+  cardinalityPlacement: CardinalityPlacement,
+): Diagram => ({
+  ...diagram,
+  view: { ...diagram.view, cardinalityPlacement },
 })
 
 export const patchCustomTheme = (

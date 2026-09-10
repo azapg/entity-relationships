@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { Attribute, Diagram, Point, Relationship } from '../../domain/types'
+import type { Attribute, Cardinality, Diagram, Point, Relationship } from '../../domain/types'
 import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, DiagramNodeData, RenderedDiagram } from '../types'
 import { staticHandleId } from './handles'
@@ -17,6 +17,14 @@ export const TERMINAL_SIZE = 12
 export const MAX_ENTITY_WIDTH = GRID_SIZE * 20
 /** Keep the diamond tips on the same grid boundary as the node box. */
 export const DIAMOND_INSET = 0
+
+const displayCardinality = (
+  participants: Array<{ cardinality: Cardinality }>,
+  index: number,
+  placement: Diagram['view']['cardinalityPlacement'],
+) => placement === 'opposite-entity'
+  ? participants[(index + 1) % participants.length]?.cardinality ?? participants[index].cardinality
+  : participants[index].cardinality
 
 // Semantic order is also the stable tie-break for automatic placement.
 export const SIDES: readonly AttributeSide[] = ['north', 'south', 'east', 'west']
@@ -483,6 +491,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
   const relationshipPositions = new Map<string, Point>()
   const entityWidths = new Map<string, number>()
   const font = view.theme === 'modern' || (view.theme === 'custom' && view.customTheme?.font === 'sans') ? 'sans' : 'serif'
+  const cardinalityPlacement = view.cardinalityPlacement ?? 'near-entity'
 
   diagram.entities.forEach((entity, index) => {
     const position = normalizedPosition(positions[entity.id] ?? { x: GRID_SIZE * (5 + index * 10), y: GRID_SIZE * 6 })
@@ -599,8 +608,8 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
         data: {
           connectorKind: 'participant',
           relationshipId: relationship.id,
-          cardinality: sourceParticipant.cardinality,
-          targetCardinality: targetParticipant.cardinality,
+          cardinality: displayCardinality(relationship.participants, 0, cardinalityPlacement),
+          targetCardinality: displayCardinality(relationship.participants, 1, cardinalityPlacement),
           cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
           selected: selectedFor(selectedId, relationship.id),
         },
@@ -633,7 +642,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
         data: {
           connectorKind: 'participant',
           relationshipId: relationship.id,
-          cardinality: participant.cardinality,
+          cardinality: displayCardinality(relationship.participants, index, cardinalityPlacement),
           cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
           recursiveOffset,
           selected: selectedFor(selectedId, relationship.id),
