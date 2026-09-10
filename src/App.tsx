@@ -29,9 +29,12 @@ import { describeCardinality, parseCardinalityLabel } from './domain/cardinality
 import type { Cardinality, CustomTheme, Diagram, Point, SemanticSelection } from './domain/types'
 import { cardinalityLabel } from './domain/types'
 import { GRID_SIZE } from './domain/layout'
-import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
+import { renderDiagram as renderChenDiagram, nodeTypes as chenNodeTypes, edgeTypes as chenEdgeTypes } from './renderers/chen-stem'
 import { relationshipHandleSide } from './renderers/chen-stem/handles'
+import { renderRelationalDiagram } from './renderers/relational'
+import { nodeTypes as relationalNodeTypes, edgeTypes as relationalEdgeTypes } from './renderers/relational'
 import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
+import { projectRelationalSchema } from './domain/relational'
 import {
   captureDiagramCanvas,
   copyDiagramImage,
@@ -107,7 +110,7 @@ type RelationshipGesture = {
 }
 
 function prepareRendered(
-  rendered: ReturnType<typeof renderDiagram>,
+  rendered: ReturnType<typeof renderChenDiagram>,
   hoveredId?: string,
   actionsFor?: (target: NodeTarget) => NodeActionHandlers,
 ) {
@@ -121,7 +124,7 @@ function prepareRendered(
         data: { ...node.data, hovered: false },
       }
     }).map((node) => {
-      if (node.data.kind === 'attribute') return node
+      if (node.data.kind === 'attribute' || node.data.kind === 'table') return node
       const target = { type: node.data.kind, id: node.data.semanticId } as NodeTarget
       return {
         ...node,
@@ -173,17 +176,20 @@ function entityAtFlowPoint(nodes: Node<DiagramNodeData>[], point: Point): string
   return hit?.data.kind === 'entity' ? hit.data.semanticId : undefined
 }
 
-function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsFor, onRelationshipGesture }: {
+function CanvasViewport({ diagram, selection, onSelect, onMove, onRelationalMove, onEdit, actionsFor, onRelationshipGesture }: {
   diagram: any
   selection: SemanticSelection
   onSelect: (s: SemanticSelection) => void
   onMove: (id: string, p: { x: number; y: number }) => void
+  onRelationalMove?: (id: string, p: { x: number; y: number }) => void
   onEdit: (target: NodeTarget) => void
   actionsFor: (target: NodeTarget) => NodeActionHandlers
   onRelationshipGesture: (gesture: RelationshipGesture) => void
 }) {
   const rf = useReactFlow()
   const layoutMode = diagram.view?.layoutMode ?? 'structured'
+  const relational = diagram.view?.renderer === 'relational'
+  const render = relational ? renderRelationalDiagram : renderChenDiagram
   const [hoveredId, setHoveredId] = useState<string>()
   const hoverClearTimer = useRef<number | undefined>(undefined)
   const connectionStart = useRef<RelationshipGesture | undefined>(undefined)
@@ -193,8 +199,8 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
   // which makes React Flow lose its drag state and visibly flicker. The
   // semantic model is still updated once, on drag stop, below.
   const initialRendered = useMemo(
-    () => prepareRendered(renderDiagram(diagram, selection?.id), hoveredId, actionsFor),
-    [actionsFor, diagram, hoveredId, selection],
+    () => prepareRendered(render(diagram, selection?.id), hoveredId, actionsFor),
+    [actionsFor, diagram, hoveredId, selection, render],
   )
   const [nodes, setNodes] = useState<Node<DiagramNodeData>[]>(initialRendered.nodes)
   const [edges, setEdges] = useState(initialRendered.edges)
@@ -207,10 +213,15 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
   // from elsewhere) replaces the local projection. This effect does not
   // depend on local nodes, so it cannot form a render loop while dragging.
   useEffect(() => {
-    const next = prepareRendered(renderDiagram(diagram, selection?.id), hoveredId, actionsFor)
+    const next = prepareRendered(render(diagram, selection?.id), hoveredId, actionsFor)
     setNodes(next.nodes)
     setEdges(next.edges)
-  }, [actionsFor, diagram, hoveredId, selection])
+  }, [actionsFor, diagram, hoveredId, selection, render])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => rf.fitView({ padding: 0.12, minZoom: 0.25, maxZoom: 1.2, duration: 240 }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [diagram.id, relational, rf])
 
   const onNodesChange = useCallback((changes: NodeChange<Node<DiagramNodeData>>[]) => {
     setNodes((current) => {
@@ -255,6 +266,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
   const selectNode = useCallback((_: React.MouseEvent, node: Node) => {
     const data: any = node.data
     if (data.kind === 'entity' || data.kind === 'relationship') onSelect({ type: data.kind, id: data.semanticId ?? node.id })
+    else if (data.kind === 'table' && !data.generated && data.semanticId) onSelect({ type: 'entity', id: data.semanticId })
     else if (data.ownerId) onSelect({ type: data.ownerKind ?? 'entity', id: data.ownerId })
   }, [onSelect])
 
@@ -354,8 +366,8 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
     <ReactFlow
       nodes={nodes}
       edges={edges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
+      nodeTypes={relational ? relationalNodeTypes : chenNodeTypes}
+      edgeTypes={relational ? relationalEdgeTypes : chenEdgeTypes}
       onNodeClick={selectNode}
       onNodeDoubleClick={onNodeDoubleClick}
       onNodeMouseEnter={onNodeMouseEnter}
@@ -363,18 +375,19 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       onPaneClick={() => onSelect(null)}
       onNodeDragStop={(_, node) => {
         const d: any = node.data
-        if (d.kind === 'entity' || d.kind === 'relationship') {
+        if (d.kind === 'entity' || d.kind === 'relationship' || (relational && d.kind === 'table')) {
           const id = d.semanticId ?? node.id
           const position = { x: node.position.x, y: node.position.y }
           // One canonical write per completed drag; all pointer-frame updates
           // above stay local, so the completed move is one history entry.
-          onMove(id, position)
+          if (relational && onRelationalMove) onRelationalMove(d.tableId ?? id, position)
+          else onMove(id, position)
         }
       }}
       onNodesChange={onNodesChange}
-      onConnectStart={onConnectStart}
-      onConnect={onConnect}
-      onConnectEnd={onConnectEnd}
+      onConnectStart={relational ? undefined : onConnectStart}
+      onConnect={relational ? undefined : onConnect}
+      onConnectEnd={relational ? undefined : onConnectEnd}
       isValidConnection={isValidConnection}
       connectionLineType={ConnectionLineType.Step}
       connectOnClick
@@ -388,14 +401,14 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       zoomOnScroll
       zoomOnDoubleClick={false}
       nodesDraggable
-      nodesConnectable
+      nodesConnectable={!relational}
       deleteKeyCode={[]}
       edgesFocusable={false}
       ariaLabelConfig={REACT_FLOW_LABELS}
       proOptions={{ hideAttribution: true }}
       selectionOnDrag={false}
       onlyRenderVisibleElements={false}
-      className={`er-flow ${layoutMode === 'structured' ? 'is-structured' : 'is-freeform'}`}
+      className={`er-flow ${layoutMode === 'structured' ? 'is-structured' : 'is-freeform'}${relational ? ' is-relational' : ''}`}
     >
       <Background
         variant={BackgroundVariant.Lines}
@@ -415,7 +428,17 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
         </button>
       </Controls>
     </ReactFlow>
+    {relational && <RelationalDiagnostics diagram={diagram} />}
   </div>
+}
+
+function RelationalDiagnostics({ diagram }: { diagram: Diagram }) {
+  const diagnostics = projectRelationalSchema(diagram).diagnostics
+  if (!diagnostics.length) return null
+  return <details className="relational-diagnostics">
+    <summary>Conversión incompleta · {diagnostics.length} aviso{diagnostics.length === 1 ? '' : 's'}</summary>
+    <div>{diagnostics.map((item) => <p key={item.id}>{item.message}</p>)}</div>
+  </details>
 }
 
 function EditorApp() {
@@ -569,7 +592,7 @@ function EditorApp() {
         return
       }
       if (
-        target?.matches('input, textarea, select, [contenteditable="true"]') ||
+        target?.matches('button, input, textarea, select, [contenteditable="true"]') ||
         target?.isContentEditable ||
         target?.closest('[role="dialog"]')
       ) return
@@ -582,6 +605,8 @@ function EditorApp() {
       } else if ((event.metaKey || event.ctrlKey) && key === 'y') {
         event.preventDefault()
         store.redo()
+      } else if (diagram.view.renderer === 'relational' && key !== 'f') {
+        return
       } else if (key === 'e') {
         event.preventDefault()
         startEntityCreation()
@@ -604,7 +629,7 @@ function EditorApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeSheet, deleteTarget, rf, selection, selectorOpen, sheet, startEntityCreation, store])
+  }, [closeSheet, deleteTarget, diagram.view.renderer, rf, selection, selectorOpen, sheet, startEntityCreation, store])
 
   useEffect(() => { if (toast) { const t = window.setTimeout(() => setToast(''), 2400); return () => window.clearTimeout(t) } }, [toast])
 
@@ -650,6 +675,10 @@ function EditorApp() {
         </button>
       </div>
       <div className="top-actions">
+        <div className="renderer-toggle" role="group" aria-label="Vista del diagrama">
+          <button type="button" className={diagram.view.renderer === 'chen-stem' ? 'active' : ''} aria-pressed={diagram.view.renderer === 'chen-stem'} onClick={() => store.setRenderer('chen-stem')}>ER</button>
+          <button type="button" className={diagram.view.renderer === 'relational' ? 'active' : ''} aria-pressed={diagram.view.renderer === 'relational'} onClick={() => { store.setRenderer('relational'); setSheet(null); store.setSelection(null) }}>Relacional</button>
+        </div>
         <button className="icon-button" disabled={!canUndo} onClick={store.undo} aria-label="Deshacer" title="Deshacer (⌘/Ctrl+Z)"><Undo2 size={18} /></button>
         <button className="icon-button" disabled={!canRedo} onClick={store.redo} aria-label="Rehacer" title="Rehacer (⌘/Ctrl+Shift+Z)"><Redo2 size={18} /></button>
         <button className="icon-button" onClick={() => { setSelectorOpen(false); setSheet('export') }} aria-label="Compartir o importar diagrama" title="Compartir o importar diagrama"><Download size={18} /></button>
@@ -657,9 +686,9 @@ function EditorApp() {
       </div>
     </header>
     {selectorOpen && <DiagramSelector currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onSeeMore={() => { setSelectorOpen(false); setSheet('library') }} onCreate={createNewDiagram} />}
-    <CanvasViewport diagram={diagram} selection={selection} onSelect={setSelection} onMove={store.setPosition} onEdit={openNodeEdit} actionsFor={actionsFor} onRelationshipGesture={handleRelationshipGesture} />
-    {!selection && <button className="fab" onClick={startEntityCreation} aria-label="Crear entidad" title="Crear entidad (E)"><Plus size={27} /><span>Nueva entidad</span></button>}
-    {selection && <ContextBar selection={selection} onAction={setSheet} onDelete={deleteSelected} />}
+    <CanvasViewport diagram={diagram} selection={selection} onSelect={setSelection} onMove={store.setPosition} onRelationalMove={store.setRelationalPosition} onEdit={openNodeEdit} actionsFor={actionsFor} onRelationshipGesture={handleRelationshipGesture} />
+    {diagram.view.renderer === 'chen-stem' && !selection && <button className="fab" onClick={startEntityCreation} aria-label="Crear entidad" title="Crear entidad (E)"><Plus size={27} /><span>Nueva entidad</span></button>}
+    {diagram.view.renderer === 'chen-stem' && selection && <ContextBar selection={selection} onAction={setSheet} onDelete={deleteSelected} />}
     {toast && <div className="toast">{toast}</div>}
     {sheet && <DialogScreen title={sheetTitle(sheet, selectedEntity, selectedRelationship)} onClose={closeSheet}>
       {sheet === 'entity' && <EntityForm entity={selectedEntity} draft={draftEntityId === selectedEntity?.id} onDone={finishEntityEdit} store={store} />}

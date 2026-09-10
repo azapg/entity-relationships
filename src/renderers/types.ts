@@ -23,7 +23,7 @@ export type NodeActionHandlers = {
   delete?: () => void
 }
 
-export type DiagramNodeKind = 'entity' | 'relationship' | 'attribute'
+export type DiagramNodeKind = 'entity' | 'relationship' | 'attribute' | 'table'
 
 export type DiagramNodeData = Record<string, unknown> & {
   semanticId: string
@@ -42,6 +42,13 @@ export type DiagramNodeData = Record<string, unknown> & {
   cardinalityPending?: boolean
   recursiveOffset?: number
   actions?: NodeActionHandlers
+  columns?: Array<{ id: string; name: string; primaryKey?: boolean; unique?: boolean; foreignKey?: boolean }>
+  generated?: boolean
+  tableId?: string
+  uniqueConstraints?: string[][]
+  titleHeight?: number
+  rowHeights?: Record<string, number>
+  constraintHeights?: Record<string, number>
 }
 
 export type RenderedDiagram = {

@@ -75,10 +75,14 @@ function isDiagram(value: unknown): value is Diagram {
   const cardinalityPlacementValid = view.cardinalityPlacement === undefined
     || view.cardinalityPlacement === 'near-entity'
     || view.cardinalityPlacement === 'opposite-entity'
-  if (view.renderer !== 'chen-stem' || !themeValid || !layoutValid
+  if (view.renderer !== undefined && view.renderer !== 'chen-stem' && view.renderer !== 'relational'
+    || !themeValid || !layoutValid
     || !cardinalityPlacementValid || !isRecord(view.positions) || !isRecord(view.attributeLayout)) return false
   if (!Object.entries(view.positions).every(([id, point]) =>
     (entityIds.has(id) || relationshipIds.has(id)) && isPoint(point))) return false
+  if (view.relationalPositions !== undefined
+    && (!isRecord(view.relationalPositions)
+      || !Object.values(view.relationalPositions).every((point) => isPoint(point)))) return false
   if (!Object.entries(view.attributeLayout).every(([id, layout]) =>
     attributeIds.has(id) && isRecord(layout) && ['north', 'east', 'south', 'west'].includes(String(layout.side)))) return false
   if (view.pendingCardinalities !== undefined
@@ -119,5 +123,7 @@ export function parseDiagramFile(source: string): Diagram {
   if (!isDiagram(value.diagram)) {
     throw new DiagramImportError('El diagrama está incompleto o contiene datos no válidos.')
   }
-  return structuredClone(value.diagram)
+  const diagram = structuredClone(value.diagram)
+  if (!diagram.view.renderer) diagram.view.renderer = 'chen-stem'
+  return diagram
 }

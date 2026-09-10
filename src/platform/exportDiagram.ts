@@ -33,6 +33,7 @@ export function diagramFileName(name: string, extension: 'png' | 'pdf' | 'json')
 function shouldIncludeInExport(node: HTMLElement) {
   return !node.classList.contains('react-flow__node-toolbar')
     && !node.classList.contains('chen-hover-actions')
+    && !node.classList.contains('relational-diagnostics')
     && !node.classList.contains('react-flow__handle')
 }
 
@@ -101,6 +102,9 @@ function renderedDiagramBounds(source: DiagramExportSource, modelBounds: ExportB
     '.chen-cardinality-label',
     '.chen-connector-edge',
     '.chen-multivalue-fork',
+    '.relational-table',
+    '.relational-fk-edge',
+    '.relational-fk-label',
   ].join(','))).map((element) => element.getBoundingClientRect())
 
   // An element's box does not grow when its text paints through

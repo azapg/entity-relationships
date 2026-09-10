@@ -2,7 +2,9 @@
 
 Editor conceptual de diagramas entidad–relación de Nightingale, con notación académica tipo Chen. El diagrama semántico es la fuente de verdad; React Flow solo representa su proyección visual.
 
-La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, temas, persistencia local, undo/redo, intercambio de diagramas editables mediante JSON y exportación del diagrama completo como PNG, PDF o imagen en el portapapeles.
+La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, temas, persistencia local, undo/redo, intercambio de diagramas editables mediante JSON y exportación de la vista activa como PNG, PDF o imagen en el portapapeles.
+
+El botón **ER | Relacional** cambia entre la notación Chen y un esquema relacional generado en modo de solo lectura. El esquema se edita desde el diagrama ER: las claves primarias se muestran como PK y las referencias como FK. Una relación 1:1 puede producir una FK con `UNIQUE`, una relación 1:N produce una FK en el lado N (por ejemplo, Película `(1,1)` y Estudio `(0,n)` hace que Película referencie a Estudio), y una relación M:N produce una tabla de unión. Cada vista conserva su propio layout. Cuando una conversión está incompleta o es ambigua, la vista muestra diagnósticos para orientar la corrección en el modelo ER.
 
 ## Arquitectura
 

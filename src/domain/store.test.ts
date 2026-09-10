@@ -324,4 +324,29 @@ describe('modelo semántico del diagrama', () => {
     state().undo()
     expect(state().diagram.view.positions[entityId]).toEqual({ x: 0, y: 0 })
   })
+
+  it('persists relational mode and layout independently while preserving the ER model', () => {
+    const original = createSampleDiagram()
+    state().resetDiagram('sample')
+    state().setSelection({ type: 'entity', id: original.entities[0].id })
+    const erPositions = structuredClone(state().diagram.view.positions)
+    const semantic = structuredClone({
+      entities: state().diagram.entities,
+      relationships: state().diagram.relationships,
+    })
+
+    state().setRenderer('relational')
+    state().setRelationalPosition('table-student', { x: 123.5, y: 88 })
+
+    expect(state().selection).toBeNull()
+    expect(state().diagram.view.positions).toEqual(erPositions)
+    expect(state().diagram.view.relationalPositions).toEqual({ 'table-student': { x: 123.5, y: 88 } })
+    expect({ entities: state().diagram.entities, relationships: state().diagram.relationships }).toEqual(semantic)
+
+    state().undo()
+    expect(state().diagram.view.renderer).toBe('relational')
+    state().undo()
+    expect(state().diagram.view.renderer).toBe('chen-stem')
+    expect(state().diagram.view.positions).toEqual(erPositions)
+  })
 })

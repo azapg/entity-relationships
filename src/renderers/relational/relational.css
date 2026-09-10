@@ -1,0 +1,22 @@
+.relational-table { min-width: 240px; overflow: visible; border: 1px solid var(--entity-stroke); border-radius: 4px; background: var(--entity-fill); color: var(--ink); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 14%, transparent); font-family: var(--diagram-font); }
+.relational-table.is-selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 62%, transparent), 0 3px 12px color-mix(in srgb, var(--ink) 12%, transparent); }
+.relational-table.is-generated { border-style: dashed; }
+.relational-table__title { min-height: 38px; display: flex; align-items: center; padding: 9px 13px; border-bottom: 1px solid var(--entity-stroke); font-weight: 700; font-size: 14px; overflow-wrap: anywhere; word-break: break-word; }
+.relational-table__columns { display: flex; flex-direction: column; }
+.relational-table__row { position: relative; display: flex; align-items: flex-start; gap: 8px; min-height: 30px; padding: 5px 12px; border-bottom: 1px solid color-mix(in srgb, var(--entity-stroke) 34%, transparent); font-size: 12px; overflow-wrap: anywhere; word-break: break-word; }
+.relational-table__row:last-child { border-bottom: 0; }
+.relational-table__key { width: 36px; flex: 0 0 36px; color: var(--ui-muted); font: 9px var(--mono-font); font-weight: 700; }
+.relational-table__key.is-primary { color: var(--accent); }
+.relational-table__name { min-width: 0; }
+.relational-table__unique { margin-left: auto; color: var(--ui-muted); font: 9px var(--mono-font); font-weight: 700; }
+.relational-table__constraint { padding: 6px 12px; color: var(--ui-muted); font: 9px var(--mono-font); overflow-wrap: anywhere; word-break: break-word; }
+.relational-table__empty { padding: 9px 12px; color: var(--ui-muted); font-size: 12px; }
+.relational-table__handle { width: 8px; height: 8px; border: 0; border-radius: 50%; background: var(--accent); opacity: .7; }
+.relational-table__handle.target { left: -4px; }
+.relational-table__handle.source { right: -4px; }
+.relational-fk-edge { stroke: var(--relationship-stroke); stroke-width: 1.5; }
+.relational-fk-label { position: absolute; padding: 2px 5px; border: 1px solid var(--ui-border); border-radius: 3px; color: var(--ui-muted); background: var(--canvas); font: 9px var(--mono-font); pointer-events: none; white-space: nowrap; }
+.relational-diagnostics { position: absolute; z-index: 4; left: 16px; top: 72px; width: min(360px, calc(100% - 32px)); max-height: min(40vh, 300px); overflow: auto; color: var(--ui-text); background: var(--ui-raised); border: 1px solid var(--ui-border); border-radius: 4px; box-shadow: var(--ui-shadow); font-size: 12px; }
+.relational-diagnostics summary { cursor: pointer; padding: 9px 11px; color: var(--ui-text); }
+.relational-diagnostics > div { padding: 0 11px 8px; color: var(--ui-muted); }
+.relational-diagnostics p { margin: 7px 0 0; line-height: 1.35; }
