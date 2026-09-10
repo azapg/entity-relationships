@@ -11,8 +11,17 @@ describe('archivos de diagrama JSON', () => {
   it('round-trips the complete semantic diagram', () => {
     const diagram = createSampleDiagram()
     diagram.view.theme = 'modern'
+    diagram.view.renderer = 'relational'
+    diagram.view.relationalPositions = { 'table-1': { x: 12.5, y: 40 } }
 
     expect(parseDiagramFile(serializeDiagramFile(diagram))).toEqual(diagram)
+  })
+
+  it('defaults version 1 files without a renderer to Chen', () => {
+    const payload = JSON.parse(serializeDiagramFile(createSampleDiagram()))
+    delete payload.diagram.view.renderer
+
+    expect(parseDiagramFile(JSON.stringify(payload)).view.renderer).toBe('chen-stem')
   })
 
   it('rejects unrelated JSON files', () => {
@@ -41,6 +50,14 @@ describe('archivos de diagrama JSON', () => {
     }
 
     expect(() => parseDiagramFile(serializeDiagramFile(diagram))).toThrow(DiagramImportError)
+  })
+
+  it('rejects malformed relational layout points', () => {
+    const payload = JSON.parse(serializeDiagramFile(createSampleDiagram()))
+    payload.diagram.view.renderer = 'relational'
+    payload.diagram.view.relationalPositions = { 'table-1': [10, 20] }
+
+    expect(() => parseDiagramFile(JSON.stringify(payload))).toThrow(DiagramImportError)
   })
 
   it('accepts the Spanish music-platform example', () => {

@@ -43,6 +43,7 @@ import type {
   Relationship,
   SemanticSelection,
   LayoutMode,
+  DiagramRenderer,
 } from './types'
 
 export const STORAGE_KEY = 'er-diagram:v1'
@@ -125,6 +126,8 @@ export type DiagramStore = {
   deleteRelationship: (id: string) => void
   setPosition: (id: string, point: Point) => void
   setLayoutMode: (mode: LayoutMode) => void
+  setRenderer: (renderer: DiagramRenderer) => void
+  setRelationalPosition: (tableId: string, point: Point) => void
   reflowAttributes: () => void
   setTheme: (theme: Diagram['view']['theme']) => void
   setCardinalityPlacement: (placement: CardinalityPlacement) => void
@@ -144,6 +147,13 @@ const getStorage = (): Storage | undefined => {
   }
 }
 
+const isPointRecord = (value: unknown): value is Record<string, Point> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  && Object.values(value as Record<string, unknown>).every((point) =>
+    Boolean(point) && typeof point === 'object' && !Array.isArray(point)
+      && Number.isFinite((point as { x?: unknown }).x)
+      && Number.isFinite((point as { y?: unknown }).y))
+
 const isDiagram = (value: unknown): value is Diagram => {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<Diagram>
@@ -154,8 +164,10 @@ const isDiagram = (value: unknown): value is Diagram => {
     Array.isArray(candidate.relationships) &&
     Boolean(candidate.view) &&
     typeof candidate.view === 'object' &&
-    candidate.view.renderer === 'chen-stem' &&
-    typeof candidate.view.positions === 'object'
+    (candidate.view.renderer === undefined || candidate.view.renderer === 'chen-stem'
+      || candidate.view.renderer === 'relational') &&
+    isPointRecord(candidate.view.positions) &&
+    (candidate.view.relationalPositions === undefined || isPointRecord(candidate.view.relationalPositions))
   )
 }
 
@@ -215,6 +227,7 @@ const migrateLegacySample = (diagram: Diagram): boolean => {
 /** Add view-only fields to diagrams written by older versions. */
 export const normalizeDiagram = (diagram: Diagram): Diagram => {
   const legacyView = diagram.view as Diagram['view'] & {
+    renderer?: unknown
     layoutMode?: unknown
     attributeLayout?: unknown
     cardinalityPlacement?: unknown
@@ -230,6 +243,7 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
     ...diagram,
     view: {
       ...diagram.view,
+      renderer: (legacyView.renderer === 'relational' ? 'relational' : 'chen-stem') as DiagramRenderer,
       layoutMode,
       cardinalityPlacement,
       attributeLayout,
@@ -257,6 +271,10 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
       positions: Object.fromEntries(Object.entries(positions)
         .filter(([id]) => !attributeIds.has(id))),
       attributeLayout: ensureAttributeLayout(candidate),
+      ...(candidate.view.relationalPositions
+        ? { relationalPositions: Object.fromEntries(Object.entries(candidate.view.relationalPositions)
+          .filter(([, point]) => Number.isFinite(point.x) && Number.isFinite(point.y))) }
+        : {}),
       ...(pendingCardinalities && Object.keys(pendingCardinalities).length
         ? { pendingCardinalities }
         : {}),
@@ -640,6 +658,32 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
     setLayoutMode: (mode) => {
       if (mode === get().diagram.view.layoutMode) return
       commit(setLayoutModeCommand(get().diagram, mode))
+    },
+
+    setRenderer: (renderer) => {
+      if (renderer !== 'chen-stem' && renderer !== 'relational') return
+      const current = get().diagram
+      if (renderer === current.view.renderer) return
+      const changed = commit({
+        ...current,
+        view: { ...current.view, renderer },
+      })
+      if (changed) set({ selection: null })
+    },
+
+    setRelationalPosition: (tableId, point) => {
+      if (!tableId || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
+      const current = get().diagram
+      commit({
+        ...current,
+        view: {
+          ...current.view,
+          relationalPositions: {
+            ...current.view.relationalPositions,
+            [tableId]: { x: point.x, y: point.y },
+          },
+        },
+      })
     },
 
     reflowAttributes: () => {

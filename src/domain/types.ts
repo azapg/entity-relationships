@@ -2,6 +2,8 @@ export type Point = { x: number; y: number }
 
 export type LayoutMode = 'structured' | 'freeform'
 
+export type DiagramRenderer = 'chen-stem' | 'relational'
+
 export type AttributeSide = 'north' | 'east' | 'south' | 'west'
 
 export type Cardinality = {
@@ -48,7 +50,7 @@ export type CustomTheme = {
 }
 
 export type DiagramView = {
-  renderer: 'chen-stem'
+  renderer: DiagramRenderer
   theme: 'academic' | 'warm' | 'modern' | 'custom'
   positions: Record<string, Point>
   layoutMode: LayoutMode
@@ -58,6 +60,8 @@ export type DiagramView = {
   /** View-only marker for relationships created before cardinalities are set. */
   pendingCardinalities?: Record<string, true>
   customTheme?: CustomTheme
+  /** View-only coordinates for tables in the relational projection. */
+  relationalPositions?: Record<string, Point>
 }
 
 export type Diagram = {
