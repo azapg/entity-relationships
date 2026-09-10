@@ -37,6 +37,16 @@ describe('modelo semántico del diagrama', () => {
       x % GRID_SIZE === 0 && y % GRID_SIZE === 0)).toBe(true)
   })
 
+  it('cambia la ubicación visible sin cambiar el significado de las cardinalidades', () => {
+    const relationship = createSampleDiagram().relationships[0]
+    state().resetDiagram('sample')
+
+    state().setCardinalityPlacement('opposite-entity')
+
+    expect(state().diagram.view.cardinalityPlacement).toBe('opposite-entity')
+    expect(state().diagram.relationships[0].participants).toEqual(relationship.participants)
+  })
+
   it('migra las etiquetas inglesas de la muestra persistida y conserva su configuración', () => {
     const storage = memoryStorage()
     const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')

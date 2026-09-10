@@ -9,6 +9,9 @@ export type Cardinality = {
   max: 1 | 'n'
 }
 
+/** Display location for a participant's cardinality on a relationship. */
+export type CardinalityPlacement = 'near-entity' | 'opposite-entity'
+
 export type Attribute = {
   id: string
   name: string
@@ -50,6 +53,8 @@ export type DiagramView = {
   positions: Record<string, Point>
   layoutMode: LayoutMode
   attributeLayout: Record<string, { side: AttributeSide }>
+  /** Optional for backwards compatibility; the default is near the entity. */
+  cardinalityPlacement?: CardinalityPlacement
   /** View-only marker for relationships created before cardinalities are set. */
   pendingCardinalities?: Record<string, true>
   customTheme?: CustomTheme

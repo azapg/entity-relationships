@@ -16,6 +16,7 @@ import {
   renameRelationship as renameRelationshipCommand,
   setDiagramName as setDiagramNameCommand,
   setDiagramTheme,
+  setCardinalityPlacement as setCardinalityPlacementCommand,
   setEntityKind as setEntityKindCommand,
   setLayoutMode as setLayoutModeCommand,
   reflowAttributes as reflowAttributesCommand,
@@ -33,6 +34,7 @@ import type {
   Attribute,
   AttributeSide,
   Cardinality,
+  CardinalityPlacement,
   CustomTheme,
   Diagram,
   Entity,
@@ -125,6 +127,7 @@ export type DiagramStore = {
   setLayoutMode: (mode: LayoutMode) => void
   reflowAttributes: () => void
   setTheme: (theme: Diagram['view']['theme']) => void
+  setCardinalityPlacement: (placement: CardinalityPlacement) => void
   updateCustomTheme: (patch: Partial<CustomTheme>) => void
   resetDiagram: (mode?: 'blank' | 'sample') => void
   undo: () => void
@@ -214,16 +217,21 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
   const legacyView = diagram.view as Diagram['view'] & {
     layoutMode?: unknown
     attributeLayout?: unknown
+    cardinalityPlacement?: unknown
   }
   const attributeLayout = legacyView.attributeLayout && typeof legacyView.attributeLayout === 'object'
     ? legacyView.attributeLayout as Diagram['view']['attributeLayout']
     : {}
   const layoutMode = normalizeLayoutMode(legacyView.layoutMode)
+  const cardinalityPlacement: CardinalityPlacement = legacyView.cardinalityPlacement === 'opposite-entity'
+    ? 'opposite-entity'
+    : 'near-entity'
   const candidate = {
     ...diagram,
     view: {
       ...diagram.view,
       layoutMode,
+      cardinalityPlacement,
       attributeLayout,
     },
   }
@@ -640,6 +648,10 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
 
     setTheme: (theme) => {
       commitWithoutHistory(setDiagramTheme(get().diagram, theme))
+    },
+
+    setCardinalityPlacement: (placement) => {
+      commitWithoutHistory(setCardinalityPlacementCommand(get().diagram, placement))
     },
 
     updateCustomTheme: (patch) => {

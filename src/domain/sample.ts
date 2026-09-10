@@ -46,6 +46,7 @@ export const createSampleDiagram = (): Diagram => ({
   view: {
     renderer: 'chen-stem',
     theme: 'academic',
+    cardinalityPlacement: 'near-entity',
     positions: {
       [sampleId('student')]: { x: 120, y: 216 },
       [sampleId('enrolls')]: { x: 432, y: 264 },
@@ -70,6 +71,7 @@ export const createBlankDiagram = (): Diagram => ({
   view: {
     renderer: 'chen-stem',
     theme: 'academic',
+    cardinalityPlacement: 'near-entity',
     positions: {},
     layoutMode: 'structured',
     attributeLayout: {},

@@ -149,6 +149,28 @@ describe('renderDiagram / Chen-stem', () => {
       .toMatchObject({ cardinality: { min: 0, max: 'n' } })
   })
 
+  it('shows each cardinality at the opposite participant when requested', () => {
+    const diagram = baseDiagram({
+      entities: [entity('first'), entity('second')],
+      relationships: [{
+        id: 'relationship', name: 'CONNECTS',
+        participants: [
+          { entityId: 'first', cardinality: { min: 0, max: 1 } },
+          { entityId: 'second', cardinality: { min: 1, max: 'n' } },
+        ],
+        attributes: [],
+      }],
+      view: {
+        ...baseDiagram().view,
+        cardinalityPlacement: 'opposite-entity',
+      },
+    })
+    const edges = renderDiagram(diagram).edges.filter((candidate) => candidate.id.startsWith('participant-edge:'))
+
+    expect(edges.find((edge) => edge.source === 'entity:first')?.data).toMatchObject({ cardinality: { min: 1, max: 'n' } })
+    expect(edges.find((edge) => edge.source === 'entity:second')?.data).toMatchObject({ cardinality: { min: 0, max: 1 } })
+  })
+
   it('uses stable typography-aware entity widths rounded to the grid', () => {
     expect(entityWidth('USER')).toBe(ENTITY_SIZE.width)
     const long = entityWidth('INTERNATIONAL_ENTERPRISE_ACCOUNT_RECORD')

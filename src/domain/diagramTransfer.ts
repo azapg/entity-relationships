@@ -72,8 +72,11 @@ function isDiagram(value: unknown): value is Diagram {
   const view = value.view
   const themeValid = ['academic', 'warm', 'modern', 'custom'].includes(String(view.theme))
   const layoutValid = view.layoutMode === 'structured' || view.layoutMode === 'freeform'
+  const cardinalityPlacementValid = view.cardinalityPlacement === undefined
+    || view.cardinalityPlacement === 'near-entity'
+    || view.cardinalityPlacement === 'opposite-entity'
   if (view.renderer !== 'chen-stem' || !themeValid || !layoutValid
-    || !isRecord(view.positions) || !isRecord(view.attributeLayout)) return false
+    || !cardinalityPlacementValid || !isRecord(view.positions) || !isRecord(view.attributeLayout)) return false
   if (!Object.entries(view.positions).every(([id, point]) =>
     (entityIds.has(id) || relationshipIds.has(id)) && isPoint(point))) return false
   if (!Object.entries(view.attributeLayout).every(([id, layout]) =>
