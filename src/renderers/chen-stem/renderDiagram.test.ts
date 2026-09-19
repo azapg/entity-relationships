@@ -8,6 +8,7 @@ import { connectionHandleBox, STATIC_HANDLE_SIDES, positionForSide, staticHandle
 import {
   ATTRIBUTE_SIZE,
   COMPOUND_COMPONENT_GAP,
+  COMPOUND_COMPONENT_DEPTH,
   COMPOUND_LEAD,
   DIAMOND_INSET,
   ENTITY_SIZE,
@@ -289,6 +290,9 @@ describe('renderDiagram / Chen-stem', () => {
     expect(parent.data.hasComponents).toBe(true)
     expect(children.every((node) => node.data.compoundComponent === true)).toBe(true)
     expect(Math.abs(children[1].position.y - children[0].position.y)).toBe(COMPOUND_COMPONENT_GAP)
+    expect((children[0].data.terminal as { x: number }).x - (parent.data.terminal as { x: number }).x)
+      .toBe(COMPOUND_COMPONENT_DEPTH)
+    expect(COMPOUND_COMPONENT_GAP).toBeGreaterThan(COMPOUND_COMPONENT_DEPTH)
   })
 
   it('places relationship attribute attachments exactly on the visible diamond', () => {

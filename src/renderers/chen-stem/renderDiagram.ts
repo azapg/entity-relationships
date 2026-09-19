@@ -11,10 +11,11 @@ export const RELATION_SIZE = { width: GRID_SIZE * 4, height: GRID_SIZE * 4 }
 export const ATTRIBUTE_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE }
 export const GENERALIZATION_SIZE = { width: GRID_SIZE * 3, height: GRID_SIZE * 2 }
 export const ATTRIBUTE_GAP = GRID_SIZE
-export const COMPOUND_LEAD = GRID_SIZE * 4
+export const COMPOUND_LEAD = GRID_SIZE * 2
 /** Compound children get a little more breathing room than ordinary
- * attributes because their parent label occupies the top of the branch. */
-export const COMPOUND_COMPONENT_GAP = GRID_SIZE * 4
+ * attributes because their parent label sits at the center of the fan. */
+export const COMPOUND_COMPONENT_GAP = GRID_SIZE * 5
+export const COMPOUND_COMPONENT_DEPTH = GRID_SIZE * 2
 export const TERMINAL_SIZE = 12
 export const MAX_ENTITY_WIDTH = GRID_SIZE * 20
 /** Keep the diamond tips on the same grid boundary as the node box. */
@@ -397,7 +398,7 @@ function ownerAttributes(
     const middle = (components.length - 1) / 2
     components.forEach((component, componentIndex) => {
       const spread = (componentIndex - middle) * COMPOUND_COMPONENT_GAP
-      const distance = ATTRIBUTE_GAP * 4
+      const distance = COMPOUND_COMPONENT_DEPTH
       const terminal = side === 'east'
         ? { x: geometry.terminal.x + distance, y: geometry.terminal.y + spread }
         : side === 'west'
