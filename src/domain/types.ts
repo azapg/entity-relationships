@@ -39,6 +39,20 @@ export type Relationship = {
   attributes: Attribute[]
 }
 
+export type GeneralizationCompleteness = 'total' | 'partial'
+
+export type GeneralizationDisjointness = 'exclusive' | 'overlapping'
+
+/** A specialization/generalization hierarchy. The supertype owns inherited
+ * attributes; subtypes only declare their additional attributes. */
+export type Generalization = {
+  id: string
+  supertypeId: string
+  subtypeIds: string[]
+  completeness: GeneralizationCompleteness
+  disjointness: GeneralizationDisjointness
+}
+
 export type CustomTheme = {
   background: string
   entity: string
@@ -65,13 +79,18 @@ export type Diagram = {
   name: string
   entities: Entity[]
   relationships: Relationship[]
+  generalizations: Generalization[]
   view: DiagramView
 }
 
 export type SemanticSelection =
   | { type: 'entity'; id: string }
   | { type: 'relationship'; id: string }
+  | { type: 'generalization'; id: string }
   | null
 
 export const cardinalityLabel = ({ min, max }: Cardinality) =>
   `(${min},${max})`
+
+export const generalizationLabel = ({ completeness, disjointness }: Generalization) =>
+  `(${completeness === 'total' ? 't' : 'p'},${disjointness === 'exclusive' ? 'e' : 's'})`

@@ -38,7 +38,9 @@ function collectAttributeIds(value: unknown, ids: Set<string>): value is Attribu
 
 function isDiagram(value: unknown): value is Diagram {
   if (!isRecord(value) || !isText(value.id) || !isText(value.name)
-    || !Array.isArray(value.entities) || !Array.isArray(value.relationships) || !isRecord(value.view)) return false
+    || !Array.isArray(value.entities) || !Array.isArray(value.relationships)
+    || (value.generalizations !== undefined && !Array.isArray(value.generalizations))
+    || !isRecord(value.view)) return false
 
   const ids = new Set<string>()
   const entityIds = new Set<string>()
@@ -69,6 +71,22 @@ function isDiagram(value: unknown): value is Diagram {
   if (!relationshipsValid || [...attributeIds].some((id) => ids.has(id))) return false
   attributeIds.forEach((id) => ids.add(id))
 
+  const generalizationIds = new Set<string>()
+  const generalizationsValid = (value.generalizations ?? []).every((generalization) => {
+    if (!isRecord(generalization) || !isText(generalization.id) || ids.has(generalization.id)
+      || !isText(generalization.supertypeId) || !entityIds.has(generalization.supertypeId)
+      || !Array.isArray(generalization.subtypeIds) || generalization.subtypeIds.length === 0
+      || generalization.completeness !== 'total' && generalization.completeness !== 'partial'
+      || generalization.disjointness !== 'exclusive' && generalization.disjointness !== 'overlapping') return false
+    const subtypeIds = generalization.subtypeIds
+    if (!subtypeIds.every((id): id is string => isText(id) && entityIds.has(id) && id !== generalization.supertypeId)
+      || new Set(subtypeIds).size !== subtypeIds.length) return false
+    ids.add(generalization.id)
+    generalizationIds.add(generalization.id)
+    return true
+  })
+  if (!generalizationsValid) return false
+
   const view = value.view
   const themeValid = ['academic', 'warm', 'modern', 'custom'].includes(String(view.theme))
   const layoutValid = view.layoutMode === 'structured' || view.layoutMode === 'freeform'
@@ -78,7 +96,7 @@ function isDiagram(value: unknown): value is Diagram {
   if (view.renderer !== 'chen-stem' || !themeValid || !layoutValid
     || !cardinalityPlacementValid || !isRecord(view.positions) || !isRecord(view.attributeLayout)) return false
   if (!Object.entries(view.positions).every(([id, point]) =>
-    (entityIds.has(id) || relationshipIds.has(id)) && isPoint(point))) return false
+    (entityIds.has(id) || relationshipIds.has(id) || generalizationIds.has(id)) && isPoint(point))) return false
   if (!Object.entries(view.attributeLayout).every(([id, layout]) =>
     attributeIds.has(id) && isRecord(layout) && ['north', 'east', 'south', 'west'].includes(String(layout.side)))) return false
   if (view.pendingCardinalities !== undefined
@@ -119,5 +137,6 @@ export function parseDiagramFile(source: string): Diagram {
   if (!isDiagram(value.diagram)) {
     throw new DiagramImportError('El diagrama está incompleto o contiene datos no válidos.')
   }
-  return structuredClone(value.diagram)
+  const diagram = structuredClone(value.diagram)
+  return { ...diagram, generalizations: diagram.generalizations ?? [] }
 }

@@ -1,5 +1,5 @@
 import { Handle, NodeToolbar, Position, useViewport, type Node, type NodeProps } from '@xyflow/react'
-import { Link2, Pencil, Plus, Trash2, Type } from 'lucide-react'
+import { GitBranch, Link2, Pencil, Plus, Trash2, Type } from 'lucide-react'
 import type { AttributeHandleLayout, DiagramNodeData } from '../types'
 import { connectionHandleBox, positionForSide, relationshipHandleId, staticHandleId, STATIC_HANDLE_SIDES } from './handles'
 
@@ -46,12 +46,14 @@ export function EntityNode({ data, selected }: NodeProps<EntityNodeType>) {
       <NodeToolbar className="chen-node-toolbar" isVisible={isSelected} position={Position.Top} offset={14}>
         <button className="nodrag nopan" onClick={invoke(actions?.addAttribute)} title="Añadir atributo (A)" aria-label="Añadir atributo"><Type size={14} /><span>Atributo</span></button>
         <button className="nodrag nopan" onClick={invoke(actions?.createRelationship)} title="Crear relación (R)" aria-label="Crear relación"><Link2 size={14} /><span>Relación</span></button>
+        <button className="nodrag nopan" onClick={invoke(actions?.createGeneralization)} title="Crear generalización (G)" aria-label="Crear generalización"><GitBranch size={14} /><span>Generalizar</span></button>
         <button className="nodrag nopan" onClick={invoke(actions?.rename)} title="Renombrar (Enter)" aria-label="Renombrar"><Pencil size={14} /><span>Renombrar</span></button>
         <button className="nodrag nopan is-danger" onClick={invoke(actions?.delete)} title="Eliminar (Delete)" aria-label="Eliminar"><Trash2 size={14} /><span>Eliminar</span></button>
       </NodeToolbar>
       <NodeToolbar className={`chen-hover-actions${data.hovered && !isSelected ? ' is-visible' : ''}`} isVisible={Boolean(data.hovered && !isSelected)} position={Position.Top} offset={14}>
         <button className="nodrag nopan" onClick={invoke(actions?.addAttribute)} title="Añadir atributo (A)" aria-label="Añadir atributo"><Plus size={13} /></button>
         <button className="nodrag nopan" onClick={invoke(actions?.createRelationship)} title="Crear relación (R)" aria-label="Crear relación"><Link2 size={13} /></button>
+        <button className="nodrag nopan" onClick={invoke(actions?.createGeneralization)} title="Crear generalización (G)" aria-label="Crear generalización"><GitBranch size={13} /></button>
       </NodeToolbar>
       {isWeak && <span className="chen-entity-node__inner" aria-hidden="true" />}
       <span className="chen-node__label">{data.label || 'Sin nombre'}</span>

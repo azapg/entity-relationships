@@ -324,4 +324,40 @@ describe('modelo semántico del diagrama', () => {
     state().undo()
     expect(state().diagram.view.positions[entityId]).toEqual({ x: 0, y: 0 })
   })
+
+  it('creates, edits, protects, and removes a generalization as semantic data', () => {
+    const personId = state().createEntity('PERSONA', 'strong', { x: 240, y: 0 })
+    const studentId = state().createEntity('ESTUDIANTE', 'strong', { x: 0, y: 360 })
+    const employeeId = state().createEntity('EMPLEADO', 'strong', { x: 480, y: 360 })
+
+    const id = state().createGeneralization(
+      personId,
+      [studentId, employeeId, studentId],
+      'total',
+      'exclusive',
+    )
+    expect(id).toBeTruthy()
+    expect(state().diagram.generalizations[0]).toMatchObject({
+      id,
+      supertypeId: personId,
+      subtypeIds: [studentId, employeeId],
+      completeness: 'total',
+      disjointness: 'exclusive',
+    })
+    expect(state().diagram.view.positions[id]).toBeUndefined()
+
+    expect(state().updateGeneralization(id, personId, [studentId, employeeId], 'partial', 'overlapping')).toBe(true)
+    expect(state().diagram.generalizations[0]).toMatchObject({
+      completeness: 'partial',
+      disjointness: 'overlapping',
+    })
+    // Reversing the hierarchy would make PERSONA its own descendant.
+    expect(state().createGeneralization(studentId, [personId], 'partial', 'exclusive')).toBe('')
+
+    state().deleteEntity(studentId)
+    expect(state().diagram.generalizations).toHaveLength(0)
+    expect(state().diagram.view.positions[id]).toBeUndefined()
+    state().undo()
+    expect(state().diagram.generalizations[0].id).toBe(id)
+  })
 })

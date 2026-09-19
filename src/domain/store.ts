@@ -4,13 +4,16 @@ import {
   cloneDiagram,
   insertEntityAndRelationship,
   insertEntity,
+  insertGeneralization,
   insertRelationship,
   moveItem,
   patchAttribute,
   patchCustomTheme,
+  patchGeneralization,
   patchParticipant,
   removeAttribute,
   removeEntity,
+  removeGeneralization,
   removeRelationship,
   renameEntity as renameEntityCommand,
   renameRelationship as renameRelationshipCommand,
@@ -29,7 +32,7 @@ import {
   relationshipPositionBetween,
   snapMajorPositions,
 } from './layout'
-import { createBlankDiagram, createSampleDiagram } from './sample'
+import { createBlankDiagram, createCase6Diagram, createSampleDiagram } from './sample'
 import type {
   Attribute,
   AttributeSide,
@@ -38,6 +41,9 @@ import type {
   CustomTheme,
   Diagram,
   Entity,
+  Generalization,
+  GeneralizationCompleteness,
+  GeneralizationDisjointness,
   Participant,
   Point,
   Relationship,
@@ -104,6 +110,20 @@ export type DiagramStore = {
     participants: Participant[],
     position?: Point,
   ) => string
+  createGeneralization: (
+    supertypeId: string,
+    subtypeIds: string[],
+    completeness: GeneralizationCompleteness,
+    disjointness: GeneralizationDisjointness,
+  ) => string
+  updateGeneralization: (
+    id: string,
+    supertypeId: string,
+    subtypeIds: string[],
+    completeness: GeneralizationCompleteness,
+    disjointness: GeneralizationDisjointness,
+  ) => boolean
+  deleteGeneralization: (id: string) => void
   createRelationshipFlow: (
     sourceEntityId: string,
     target: string | { name?: string; kind?: Entity['kind']; position?: Point },
@@ -129,7 +149,7 @@ export type DiagramStore = {
   setTheme: (theme: Diagram['view']['theme']) => void
   setCardinalityPlacement: (placement: CardinalityPlacement) => void
   updateCustomTheme: (patch: Partial<CustomTheme>) => void
-  resetDiagram: (mode?: 'blank' | 'sample') => void
+  resetDiagram: (mode?: 'blank' | 'sample' | 'case6') => void
   undo: () => void
   redo: () => void
 }
@@ -152,6 +172,7 @@ const isDiagram = (value: unknown): value is Diagram => {
     typeof candidate.name === 'string' &&
     Array.isArray(candidate.entities) &&
     Array.isArray(candidate.relationships) &&
+    (candidate.generalizations === undefined || Array.isArray(candidate.generalizations)) &&
     Boolean(candidate.view) &&
     typeof candidate.view === 'object' &&
     candidate.view.renderer === 'chen-stem' &&
@@ -214,6 +235,18 @@ const migrateLegacySample = (diagram: Diagram): boolean => {
 
 /** Add view-only fields to diagrams written by older versions. */
 export const normalizeDiagram = (diagram: Diagram): Diagram => {
+  const entityIds = new Set(diagram.entities.map((entity) => entity.id))
+  const generalizations = Array.isArray(diagram.generalizations)
+    ? diagram.generalizations.filter((generalization) => (
+      generalization
+      && typeof generalization.id === 'string'
+      && entityIds.has(generalization.supertypeId)
+      && Array.isArray(generalization.subtypeIds)
+      && generalization.subtypeIds.length > 0
+      && generalization.subtypeIds.every((id) => entityIds.has(id) && id !== generalization.supertypeId)
+      && (generalization.completeness === 'total' || generalization.completeness === 'partial')
+    )).filter((generalization) => generalization.disjointness === 'exclusive' || generalization.disjointness === 'overlapping')
+    : []
   const legacyView = diagram.view as Diagram['view'] & {
     layoutMode?: unknown
     attributeLayout?: unknown
@@ -228,6 +261,7 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
     : 'near-entity'
   const candidate = {
     ...diagram,
+    generalizations,
     view: {
       ...diagram.view,
       layoutMode,
@@ -244,6 +278,10 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
     ? { ...diagram.view.positions }
     : snapMajorPositions(candidate)
   const relationshipIds = new Set(diagram.relationships.map((relationship) => relationship.id))
+  const majorIds = new Set([
+    ...entityIds,
+    ...relationshipIds,
+  ])
   const pendingCardinalities = diagram.view.pendingCardinalities
     ? Object.fromEntries(Object.entries(diagram.view.pendingCardinalities)
       .filter(([id, pending]) => relationshipIds.has(id) && pending === true)) as Record<string, true>
@@ -255,7 +293,7 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
       // Structured diagrams retain a canonical grid position; freeform
       // diagrams retain the user's exact coordinates.
       positions: Object.fromEntries(Object.entries(positions)
-        .filter(([id]) => !attributeIds.has(id))),
+        .filter(([id]) => majorIds.has(id) && !attributeIds.has(id))),
       attributeLayout: ensureAttributeLayout(candidate),
       ...(pendingCardinalities && Object.keys(pendingCardinalities).length
         ? { pendingCardinalities }
@@ -376,14 +414,47 @@ const unspecifiedCardinality = (): Cardinality => ({ min: 0, max: 'n' })
 
 const selectionStillExists = (selection: SemanticSelection, diagram: Diagram) => {
   if (!selection) return true
-  return selection.type === 'entity'
-    ? diagram.entities.some((entity) => entity.id === selection.id)
-    : diagram.relationships.some((relationship) => relationship.id === selection.id)
+  if (selection.type === 'entity') return diagram.entities.some((entity) => entity.id === selection.id)
+  if (selection.type === 'relationship') return diagram.relationships.some((relationship) => relationship.id === selection.id)
+  return diagram.generalizations.some((generalization) => generalization.id === selection.id)
+}
+
+const validGeneralizationMembers = (diagram: Diagram, supertypeId: string, subtypeIds: string[]) => {
+  const entityIds = new Set(diagram.entities.map((entity) => entity.id))
+  const uniqueSubtypeIds = [...new Set(subtypeIds)]
+  if (!entityIds.has(supertypeId) || uniqueSubtypeIds.length === 0
+    || uniqueSubtypeIds.some((id) => id === supertypeId || !entityIds.has(id))) return undefined
+  return uniqueSubtypeIds
+}
+
+const introducesGeneralizationCycle = (
+  diagram: Diagram,
+  supertypeId: string,
+  subtypeIds: string[],
+  excludedId?: string,
+) => {
+  const descendants = new Map<string, string[]>()
+  diagram.generalizations.forEach((generalization) => {
+    if (generalization.id === excludedId) return
+    descendants.set(generalization.supertypeId, [
+      ...(descendants.get(generalization.supertypeId) ?? []),
+      ...generalization.subtypeIds,
+    ])
+  })
+  descendants.set(supertypeId, [...(descendants.get(supertypeId) ?? []), ...subtypeIds])
+  const visit = (id: string, path: Set<string>): boolean => {
+    if (path.has(id)) return true
+    const nextPath = new Set(path).add(id)
+    return (descendants.get(id) ?? []).some((child) => visit(child, nextPath))
+  }
+  return [...descendants.keys()].some((id) => visit(id, new Set()))
 }
 
 const initialDiagrams = readPersistedDiagrams()
-const initialDiagram = initialDiagrams[0] ?? normalizeDiagram(createSampleDiagram())
-const initialLibrary = initialDiagrams.length ? initialDiagrams : [initialDiagram]
+const initialDiagram = initialDiagrams[0] ?? normalizeDiagram(createCase6Diagram())
+const initialLibrary = initialDiagrams.length
+  ? initialDiagrams
+  : [initialDiagram, normalizeDiagram(createSampleDiagram())]
 
 const putDiagramFirst = (diagrams: Diagram[], diagram: Diagram) => [
   diagram,
@@ -561,6 +632,38 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       return id
     },
 
+    createGeneralization: (supertypeId, subtypeIds, completeness, disjointness) => {
+      const current = get().diagram
+      const members = validGeneralizationMembers(current, supertypeId, subtypeIds)
+      if (!members || introducesGeneralizationCycle(current, supertypeId, members)) return ''
+      const id = makeId('generalization')
+      const generalization: Generalization = {
+        id,
+        supertypeId,
+        subtypeIds: members,
+        completeness,
+        disjointness,
+      }
+      commit(insertGeneralization(current, generalization))
+      return id
+    },
+
+    updateGeneralization: (id, supertypeId, subtypeIds, completeness, disjointness) => {
+      const current = get().diagram
+      const members = validGeneralizationMembers(current, supertypeId, subtypeIds)
+      if (!members || introducesGeneralizationCycle(current, supertypeId, members, id)) return false
+      return commit(patchGeneralization(current, id, {
+        supertypeId,
+        subtypeIds: members,
+        completeness,
+        disjointness,
+      }))
+    },
+
+    deleteGeneralization: (id) => {
+      commit(removeGeneralization(get().diagram, id))
+    },
+
     /**
      * Shared relationship command used by the sheet, keyboard/toolbar entry
      * points, and direct handle gestures. A new target entity and its
@@ -659,7 +762,7 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
     },
 
     resetDiagram: (mode = 'blank') => {
-      commit(mode === 'sample' ? createSampleDiagram() : createBlankDiagram())
+      commit(mode === 'sample' ? createSampleDiagram() : mode === 'case6' ? createCase6Diagram() : createBlankDiagram())
       set({ selection: null })
     },
 

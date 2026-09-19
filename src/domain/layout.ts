@@ -72,7 +72,7 @@ const majorIds = (diagram: Diagram) => new Set([
   ...diagram.relationships.map((relationship) => relationship.id),
 ])
 
-/** Snap only entity/relationship coordinates; attributes have no coordinates. */
+/** Snap entity and relationship coordinates; attributes and hierarchy junctions are derived. */
 export const snapMajorPositions = (diagram: Diagram): Record<string, Point> => {
   const ids = majorIds(diagram)
   return Object.fromEntries(

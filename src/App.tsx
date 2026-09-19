@@ -17,7 +17,7 @@ import {
 import {
   Plus, Undo2, Redo2, Maximize, Type, Link2, Pencil,
   Trash2, Check, ChevronDown, ChevronRight, KeyRound, SquareDashed,
-  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy, FileJson, Upload,
+  FilePlus2, LayoutList, Settings, Download, FileImage, FileText, Copy, FileJson, Upload, GitBranch,
 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import './styles/app.css'
@@ -26,10 +26,19 @@ import { EditorTextInput } from './components/EditorTextInput'
 import { useDiagramStore } from './domain/store'
 import { setSystemTheme } from './platform/systemBars'
 import { describeCardinality, parseCardinalityLabel } from './domain/cardinality'
-import type { Cardinality, CustomTheme, Diagram, Point, SemanticSelection } from './domain/types'
-import { cardinalityLabel } from './domain/types'
+import type {
+  Cardinality,
+  CustomTheme,
+  Diagram,
+  Generalization,
+  GeneralizationCompleteness,
+  GeneralizationDisjointness,
+  Point,
+  SemanticSelection,
+} from './domain/types'
+import { cardinalityLabel, generalizationLabel } from './domain/types'
 import { GRID_SIZE } from './domain/layout'
-import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
+import { generalizationPosition, renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
 import { relationshipHandleSide } from './renderers/chen-stem/handles'
 import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
 import {
@@ -42,7 +51,7 @@ import {
 } from './platform/exportDiagram'
 import { DiagramImportError, MAX_DIAGRAM_FILE_BYTES, parseDiagramFile } from './domain/diagramTransfer'
 
-type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'menu' | 'library' | 'export' | null
+type SheetName = 'entity' | 'attribute' | 'relationship' | 'relationshipEdit' | 'cardinality' | 'generalization' | 'menu' | 'library' | 'export' | null
 
 const BRAND_MARK_URL = "/brand/nightingale-mark.svg"
 const REACT_FLOW_LABELS = {
@@ -144,7 +153,7 @@ function prepareRendered(
   }
 }
 
-function semanticIdFromNodeId(nodeId: string | null | undefined, kind: 'entity' | 'relationship' = 'entity') {
+function semanticIdFromNodeId(nodeId: string | null | undefined, kind: 'entity' | 'relationship' | 'generalization' = 'entity') {
   const prefix = `${kind}:`
   return nodeId?.startsWith(prefix) ? nodeId.slice(prefix.length) : undefined
 }
@@ -171,6 +180,40 @@ function entityAtFlowPoint(nodes: Node<DiagramNodeData>[], point: Point): string
       && point.y <= node.position.y + height
   })
   return hit?.data.kind === 'entity' ? hit.data.semanticId : undefined
+}
+
+function followGeneralizationEntities(
+  nodes: Node<DiagramNodeData>[],
+  generalizations: Diagram['generalizations'],
+  structured: boolean,
+) {
+  const entityNodes = new Map(nodes
+    .filter((node) => node.data.kind === 'entity')
+    .map((node) => [node.data.semanticId, node]))
+  const byId = new Map(generalizations.map((generalization) => [generalization.id, generalization]))
+  return nodes.map((node) => {
+    if (node.data.kind !== 'generalization') return node
+    const hierarchy = byId.get(node.data.semanticId)
+    if (!hierarchy) return node
+    const supertype = entityNodes.get(hierarchy.supertypeId)
+    const subtypes = hierarchy.subtypeIds.flatMap((id) => {
+      const subtype = entityNodes.get(id)
+      return subtype ? [{
+        position: subtype.position,
+        width: subtype.data.width ?? subtype.width ?? 192,
+        height: subtype.data.height ?? subtype.height ?? 96,
+      }] : []
+    })
+    if (!supertype || !subtypes.length) return node
+    return {
+      ...node,
+      position: generalizationPosition({
+        position: supertype.position,
+        width: supertype.data.width ?? supertype.width ?? 192,
+        height: supertype.data.height ?? supertype.height ?? 96,
+      }, subtypes, structured),
+    }
+  })
 }
 
 function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsFor, onRelationshipGesture }: {
@@ -225,7 +268,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
         const owner = currentById.get(change.id)
         if (!owner) return
         const data: any = owner?.data
-        if (data?.kind !== 'entity' && data?.kind !== 'relationship') return
+        if (data?.kind !== 'entity' && data?.kind !== 'relationship' && data?.kind !== 'generalization') return
         ownerDeltas.set(`${data.kind}:${data.semanticId ?? change.id}`, {
           x: change.position.x - owner.position.x,
           y: change.position.y - owner.position.y,
@@ -233,9 +276,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       })
 
       const changed = applyNodeChanges<Node<DiagramNodeData>>(changes, current)
-      if (ownerDeltas.size === 0) return changed
-
-      return changed.map((node) => {
+      const withAttributes = ownerDeltas.size === 0 ? changed : changed.map((node) => {
         const data: any = node.data
         if (data?.kind !== 'attribute') return node
         const delta = ownerDeltas.get(`${data.ownerKind}:${data.ownerId}`)
@@ -249,12 +290,13 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
           },
         }
       })
+      return followGeneralizationEntities(withAttributes, diagram.generalizations, layoutMode === 'structured')
     })
-  }, [])
+  }, [diagram.generalizations, layoutMode])
 
   const selectNode = useCallback((_: React.MouseEvent, node: Node) => {
     const data: any = node.data
-    if (data.kind === 'entity' || data.kind === 'relationship') onSelect({ type: data.kind, id: data.semanticId ?? node.id })
+    if (data.kind === 'entity' || data.kind === 'relationship' || data.kind === 'generalization') onSelect({ type: data.kind, id: data.semanticId ?? node.id })
     else if (data.ownerId) onSelect({ type: data.ownerKind ?? 'entity', id: data.ownerId })
   }, [onSelect])
 
@@ -265,13 +307,13 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       hoverClearTimer.current = undefined
     }
     const data: any = node.data
-    if (data.kind === 'entity' || data.kind === 'relationship') setHoveredId(data.semanticId ?? node.id)
+    if (data.kind === 'entity' || data.kind === 'relationship' || data.kind === 'generalization') setHoveredId(data.semanticId ?? node.id)
   }, [])
 
   const onNodeMouseLeave = useCallback((_: React.MouseEvent, node: Node) => {
     if (!window.matchMedia?.('(pointer: fine)')?.matches) return
     const data: any = node.data
-    if (data.kind !== 'entity' && data.kind !== 'relationship') return
+    if (data.kind !== 'entity' && data.kind !== 'relationship' && data.kind !== 'generalization') return
     const id = data.semanticId ?? node.id
     if (hoverClearTimer.current !== undefined) window.clearTimeout(hoverClearTimer.current)
     hoverClearTimer.current = window.setTimeout(() => {
@@ -282,7 +324,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
 
   const onNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
     const data: any = node.data
-    if (data.kind !== 'entity' && data.kind !== 'relationship') return
+    if (data.kind !== 'entity' && data.kind !== 'relationship' && data.kind !== 'generalization') return
     onEdit({ type: data.kind, id: data.semanticId ?? node.id })
   }, [onEdit])
 
@@ -363,7 +405,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       onPaneClick={() => onSelect(null)}
       onNodeDragStop={(_, node) => {
         const d: any = node.data
-        if (d.kind === 'entity' || d.kind === 'relationship') {
+        if (d.kind === 'entity' || d.kind === 'relationship' || d.kind === 'generalization') {
           const id = d.semanticId ?? node.id
           const position = { x: node.position.x, y: node.position.y }
           // One canonical write per completed drag; all pointer-frame updates
@@ -435,6 +477,7 @@ function EditorApp() {
 
   const selectedEntity = selection?.type === 'entity' ? diagram.entities.find((e: any) => e.id === selection.id) : undefined
   const selectedRelationship = selection?.type === 'relationship' ? diagram.relationships.find((r: any) => r.id === selection.id) : undefined
+  const selectedGeneralization = selection?.type === 'generalization' ? diagram.generalizations.find((g: any) => g.id === selection.id) : undefined
 
   const setSelection = useCallback((next: SemanticSelection) => {
     store.setSelection(next)
@@ -444,7 +487,8 @@ function EditorApp() {
   const deleteTarget = useCallback((target: SemanticSelection) => {
     if (!target) return
     if (target.type === 'entity') store.deleteEntity(target.id)
-    else store.deleteRelationship(target.id)
+    else if (target.type === 'relationship') store.deleteRelationship(target.id)
+    else store.deleteGeneralization(target.id)
     if (selection?.id === target.id && selection.type === target.type) store.setSelection(null)
     setSheet(null)
   }, [selection, store])
@@ -514,14 +558,19 @@ function EditorApp() {
   }, [store])
 
   const openNodeEdit = useCallback((target: NodeTarget) => {
-    openNodeAction(target, target.type === 'entity' ? 'entity' : 'relationshipEdit')
+    openNodeAction(
+      target,
+      target.type === 'entity' ? 'entity' : target.type === 'relationship' ? 'relationshipEdit' : 'generalization',
+    )
   }, [openNodeAction])
 
   const actionsFor = useCallback((target: NodeTarget): NodeActionHandlers => ({
-    addAttribute: () => openNodeAction(target, 'attribute'),
+    addAttribute: target.type === 'generalization' ? undefined : () => openNodeAction(target, 'attribute'),
     createRelationship: target.type === 'entity' ? () => openNodeAction(target, 'relationship') : undefined,
-    rename: () => openNodeAction(target, target.type === 'entity' ? 'entity' : 'relationshipEdit'),
+    createGeneralization: target.type === 'entity' ? () => openNodeAction(target, 'generalization') : undefined,
+    rename: target.type === 'generalization' ? undefined : () => openNodeAction(target, target.type === 'entity' ? 'entity' : 'relationshipEdit'),
     editCardinality: target.type === 'relationship' ? () => openNodeAction(target, 'cardinality') : undefined,
+    editGeneralization: target.type === 'generalization' ? () => openNodeAction(target, 'generalization') : undefined,
     delete: () => deleteTarget(target),
   }), [deleteTarget, openNodeAction])
 
@@ -585,15 +634,18 @@ function EditorApp() {
       } else if (key === 'e') {
         event.preventDefault()
         startEntityCreation()
-      } else if (key === 'a' && selection) {
+      } else if (key === 'a' && selection && selection.type !== 'generalization') {
         event.preventDefault()
         setSheet('attribute')
       } else if (key === 'r' && selection?.type === 'entity') {
         event.preventDefault()
         setSheet('relationship')
+      } else if (key === 'g' && selection?.type === 'entity') {
+        event.preventDefault()
+        setSheet('generalization')
       } else if (key === 'enter' && selection) {
         event.preventDefault()
-        setSheet(selection.type === 'entity' ? 'entity' : 'relationshipEdit')
+        setSheet(selection.type === 'entity' ? 'entity' : selection.type === 'relationship' ? 'relationshipEdit' : 'generalization')
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selection) {
         event.preventDefault()
         deleteTarget(selection)
@@ -661,12 +713,13 @@ function EditorApp() {
     {!selection && <button className="fab" onClick={startEntityCreation} aria-label="Crear entidad" title="Crear entidad (E)"><Plus size={27} /><span>Nueva entidad</span></button>}
     {selection && <ContextBar selection={selection} onAction={setSheet} onDelete={deleteSelected} />}
     {toast && <div className="toast">{toast}</div>}
-    {sheet && <DialogScreen title={sheetTitle(sheet, selectedEntity, selectedRelationship)} onClose={closeSheet}>
+    {sheet && <DialogScreen title={sheetTitle(sheet, selectedEntity, selectedRelationship, selectedGeneralization)} onClose={closeSheet}>
       {sheet === 'entity' && <EntityForm entity={selectedEntity} draft={draftEntityId === selectedEntity?.id} onDone={finishEntityEdit} store={store} />}
       {sheet === 'attribute' && <AttributeEditor ownerType={selectedEntity ? 'entity' : 'relationship'} owner={selectedEntity ?? selectedRelationship} onDone={() => setSheet(null)} store={store} />}
       {sheet === 'relationship' && <RelationshipFlow selectedEntity={selectedEntity} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'relationshipEdit' && selectedRelationship && <RelationshipEditor relationship={selectedRelationship} draft={draftRelationshipId === selectedRelationship.id} store={store} onDone={finishRelationshipEdit} />}
       {sheet === 'cardinality' && selectedRelationship && <CardinalityEditor relationship={selectedRelationship} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
+      {sheet === 'generalization' && <GeneralizationEditor generalization={selectedGeneralization} initialSupertype={selectedEntity} entities={diagram.entities} store={store} onDone={() => setSheet(null)} />}
       {sheet === 'library' && <DiagramLibrary currentId={diagram.id} diagrams={diagrams} onSelect={openStoredDiagram} onCreate={createNewDiagram} />}
       {sheet === 'export' && <ExportDiagramPanel diagram={diagram} rf={rf} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
       {sheet === 'menu' && <DiagramMenu diagram={diagram} view={diagram.view} store={store} onClose={() => setSheet(null)} onToast={setToast} />}
@@ -677,7 +730,8 @@ function EditorApp() {
 function diagramSummary(diagram: Diagram) {
   const entityLabel = diagram.entities.length === 1 ? 'entidad' : 'entidades'
   const relationshipLabel = diagram.relationships.length === 1 ? 'relación' : 'relaciones'
-  return `${diagram.entities.length} ${entityLabel} · ${diagram.relationships.length} ${relationshipLabel}`
+  const generalizationLabel = diagram.generalizations.length === 1 ? 'generalización' : 'generalizaciones'
+  return `${diagram.entities.length} ${entityLabel} · ${diagram.relationships.length} ${relationshipLabel} · ${diagram.generalizations.length} ${generalizationLabel}`
 }
 
 function DiagramSelector({ currentId, diagrams, onSelect, onSeeMore, onCreate }: {
@@ -736,9 +790,17 @@ function DiagramLibrary({ currentId, diagrams, onSelect, onCreate }: {
 
 function ContextBar({ selection, onAction, onDelete }: { selection: NonNullable<SemanticSelection>; onAction: (s: SheetName) => void; onDelete: () => void }) {
   const entity = selection.type === 'entity'
+  const relationship = selection.type === 'relationship'
+  if (selection.type === 'generalization') return <nav className="context-bar" aria-label="Acciones de la generalización seleccionada">
+    <button onClick={() => onAction('generalization')} title="Editar cobertura (Enter)"><Pencil size={17} /><span>Editar</span></button>
+    <button className="danger-ghost" onClick={onDelete} title="Eliminar (Delete/Backspace)"><Trash2 size={17} /><span>Eliminar</span></button>
+  </nav>
   return <nav className="context-bar" aria-label="Acciones del elemento seleccionado">
     <button onClick={() => onAction('attribute')} title="Añadir atributo (A)"><Type size={17} /><span>Atributo</span></button>
-    {entity ? <button onClick={() => onAction('relationship')} title="Crear relación (R)"><Link2 size={17} /><span>Relacionar</span></button> : <button onClick={() => onAction('cardinality')} title="Editar cardinalidad"><Link2 size={17} /><span>Cardinalidad</span></button>}
+    {entity ? <>
+      <button onClick={() => onAction('relationship')} title="Crear relación (R)"><Link2 size={17} /><span>Relacionar</span></button>
+      <button onClick={() => onAction('generalization')} title="Crear generalización (G)"><GitBranch size={17} /><span>Generalizar</span></button>
+    </> : relationship ? <button onClick={() => onAction('cardinality')} title="Editar cardinalidad"><Link2 size={17} /><span>Cardinalidad</span></button> : null}
     <button onClick={() => onAction(entity ? 'entity' : 'relationshipEdit')} title="Renombrar (Enter)"><Pencil size={17} /><span>Editar</span></button>
     <button className="danger-ghost" onClick={onDelete} title="Eliminar (Delete/Backspace)"><Trash2 size={17} /><span>Eliminar</span></button>
   </nav>
@@ -905,6 +967,99 @@ function CardinalityEditor({ relationship, entities, store, onDone }: any) {
   </form>
 }
 
+function GeneralizationEditor({ generalization, initialSupertype, entities, store, onDone }: {
+  generalization?: Generalization
+  initialSupertype?: { id: string; name: string }
+  entities: Array<{ id: string; name: string }>
+  store: any
+  onDone: () => void
+}) {
+  const [supertypeId, setSupertypeId] = useState(
+    generalization?.supertypeId ?? initialSupertype?.id ?? entities[0]?.id ?? '',
+  )
+  const [subtypeIds, setSubtypeIds] = useState<string[]>(generalization?.subtypeIds ?? [])
+  const [completeness, setCompleteness] = useState<GeneralizationCompleteness>(generalization?.completeness ?? 'total')
+  const [disjointness, setDisjointness] = useState<GeneralizationDisjointness>(generalization?.disjointness ?? 'exclusive')
+  const [error, setError] = useState('')
+  const supertype = entities.find((entity) => entity.id === supertypeId)
+  const subtypeOptions = entities.filter((entity) => entity.id !== supertypeId)
+  const preview = generalizationLabel({
+    id: generalization?.id ?? 'preview',
+    supertypeId,
+    subtypeIds,
+    completeness,
+    disjointness,
+  })
+  const toggleSubtype = (id: string) => {
+    setError('')
+    setSubtypeIds((current) => current.includes(id)
+      ? current.filter((candidate) => candidate !== id)
+      : [...current, id])
+  }
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!supertypeId || subtypeIds.length === 0) return
+    if (generalization) {
+      if (!store.updateGeneralization(generalization.id, supertypeId, subtypeIds, completeness, disjointness)) {
+        setError('La jerarquía produciría un ciclo. Revisa el supertipo y los subtipos.')
+        return
+      }
+      onDone()
+      return
+    }
+    const id = store.createGeneralization(supertypeId, subtypeIds, completeness, disjointness)
+    if (!id) {
+      setError('No se pudo crear la jerarquía. Revisa el supertipo y los subtipos.')
+      return
+    }
+    store.setSelection({ type: 'generalization', id })
+    onDone()
+  }
+
+  return <form className="form-stack dialog-form" onSubmit={submit}>
+    <label>Supertipo
+      <select value={supertypeId} onChange={(event) => {
+        const next = event.target.value
+        setSupertypeId(next)
+        setSubtypeIds((current) => current.filter((id) => id !== next))
+        setError('')
+      }}>
+        {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}
+      </select>
+    </label>
+    <fieldset className="subtype-fieldset">
+      <legend>Subtipos</legend>
+      <div className="subtype-list">
+        {subtypeOptions.map((entity) => <label className="subtype-option" key={entity.id}>
+          <input type="checkbox" checked={subtypeIds.includes(entity.id)} onChange={() => toggleSubtype(entity.id)} />
+          <span>{entity.name}</span>
+        </label>)}
+      </div>
+      {!subtypeOptions.length && <p className="empty-note">Crea otra entidad para usarla como subtipo.</p>}
+    </fieldset>
+    <div className="coverage-heading"><span>Cobertura</span><code>{preview}</code></div>
+    <div className="coverage-controls">
+      <div>
+        <span className="choice-label">Completitud</span>
+        <div className="segmented" role="group" aria-label="Completitud de la generalización">
+          <button type="button" className={completeness === 'total' ? 'active' : ''} aria-pressed={completeness === 'total'} onClick={() => setCompleteness('total')}>t · Total</button>
+          <button type="button" className={completeness === 'partial' ? 'active' : ''} aria-pressed={completeness === 'partial'} onClick={() => setCompleteness('partial')}>p · Parcial</button>
+        </div>
+      </div>
+      <div>
+        <span className="choice-label">Solapamiento</span>
+        <div className="segmented" role="group" aria-label="Solapamiento de los subtipos">
+          <button type="button" className={disjointness === 'exclusive' ? 'active' : ''} aria-pressed={disjointness === 'exclusive'} onClick={() => setDisjointness('exclusive')}>e · Exclusiva</button>
+          <button type="button" className={disjointness === 'overlapping' ? 'active' : ''} aria-pressed={disjointness === 'overlapping'} onClick={() => setDisjointness('overlapping')}>s · Superpuesta</button>
+        </div>
+      </div>
+    </div>
+    <p className="coverage-summary"><strong>{supertype?.name ?? 'El supertipo'}</strong>: {completeness === 'total' ? 'cada instancia pertenece a algún subtipo' : 'puede haber instancias sin subtipo'}; {disjointness === 'exclusive' ? 'cada instancia pertenece como máximo a uno' : 'una instancia puede pertenecer a varios'}.</p>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <button className="primary-button dialog-submit" disabled={!supertypeId || subtypeIds.length === 0}><GitBranch size={17} />{generalization ? 'Guardar generalización' : 'Crear generalización'}</button>
+  </form>
+}
+
 function AppearanceEditor({ view, store, onDone }: any) {
   const [custom, setCustom] = useState<CustomTheme>(view.customTheme ?? { background: '#fbf9f4', entity: '#ffffff', relationship: '#f6e3da', ink: '#1c1915', font: 'serif' })
   const layoutMode = view.layoutMode ?? 'structured'
@@ -915,8 +1070,8 @@ function AppearanceEditor({ view, store, onDone }: any) {
 function DiagramMenu({ diagram, view, store, onClose, onToast }: any) {
   const [name, setName] = useState(diagram.name)
   const rename = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) store.setDiagramName(name.trim()); onClose() }
-  const reset = (mode: 'blank' | 'sample') => { if (window.confirm(mode === 'blank' ? '¿Crear un diagrama vacío? Se reemplazará el contenido actual.' : '¿Restaurar el diagrama de ejemplo?')) { store.resetDiagram(mode); onClose(); onToast('Diagrama actualizado') } }
-  return <div className="menu-stack dialog-stack"><form onSubmit={rename} className="form-stack dialog-form"><label>Nombre del diagrama<EditorTextInput value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="shortcut-list" aria-label="Atajos de teclado"><p className="section-kicker">Atajos de teclado</p><div><kbd>E</kbd><span>Nueva entidad</span><kbd>A</kbd><span>Atributo</span></div><div><kbd>R</kbd><span>Relación</span><kbd>Enter</kbd><span>Renombrar</span></div><div><kbd>F</kbd><span>Ajustar vista</span><kbd>⌘/Ctrl Z</kbd><span>Deshacer</span></div></div><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar ejemplo</span></button><div className="menu-divider" /><AppearanceEditor view={view} store={store} onDone={onClose} /></div>
+  const reset = (mode: 'blank' | 'sample') => { if (window.confirm(mode === 'blank' ? '¿Crear un diagrama vacío? Se reemplazará el contenido actual.' : '¿Restaurar Caso 6? Se reemplazará el contenido actual.')) { store.resetDiagram(mode === 'sample' ? 'case6' : mode); onClose(); onToast('Diagrama actualizado') } }
+  return <div className="menu-stack dialog-stack"><form onSubmit={rename} className="form-stack dialog-form"><label>Nombre del diagrama<EditorTextInput value={name} onChange={e => setName(e.target.value)} /></label><button className="primary-button dialog-submit" disabled={!name.trim()}><Check size={17} />Guardar nombre</button></form><div className="menu-divider" /><button className="menu-action" onClick={() => { store.reflowAttributes(); onClose(); onToast('Atributos redistribuidos') }}><Type size={18} /><span>Redistribuir atributos</span></button><div className="shortcut-list" aria-label="Atajos de teclado"><p className="section-kicker">Atajos de teclado</p><div><kbd>E</kbd><span>Nueva entidad</span><kbd>A</kbd><span>Atributo</span></div><div><kbd>R</kbd><span>Relación</span><kbd>G</kbd><span>Generalización</span></div><div><kbd>Enter</kbd><span>Editar</span><kbd>F</kbd><span>Ajustar vista</span></div><div><kbd>⌘/Ctrl Z</kbd><span>Deshacer</span><kbd>Delete</kbd><span>Eliminar</span></div></div><div className="menu-divider" /><button className="menu-action" onClick={() => reset('blank')}><Plus size={18} /><span>Nuevo diagrama</span></button><button className="menu-action" onClick={() => reset('sample')}><SquareDashed size={18} /><span>Restaurar Caso 6</span></button><div className="menu-divider" /><AppearanceEditor view={view} store={store} onDone={onClose} /></div>
 }
 
 type ExportAction = 'png' | 'pdf' | 'copy'
@@ -1027,12 +1182,13 @@ function customStyle(theme?: CustomTheme): React.CSSProperties | undefined {
   return { '--custom-bg': theme.background, '--custom-entity': theme.entity, '--custom-relationship': theme.relationship, '--custom-ink': theme.ink, '--custom-font': theme.font === 'serif' ? 'Newsreader, Georgia, serif' : 'Host Grotesk, system-ui, sans-serif' } as React.CSSProperties
 }
 
-function sheetTitle(sheet: SheetName, entity: any, relationship: any) {
+function sheetTitle(sheet: SheetName, entity: any, relationship: any, generalization?: Generalization) {
   if (sheet === 'entity') return entity ? 'Editar entidad' : 'Nueva entidad'
   if (sheet === 'attribute') return `Atributos de ${entity?.name ?? relationship?.name ?? ''}`
   if (sheet === 'relationship') return 'Nueva relación'
   if (sheet === 'relationshipEdit') return 'Editar relación'
   if (sheet === 'cardinality') return 'Cardinalidades'
+  if (sheet === 'generalization') return generalization ? 'Editar generalización' : 'Nueva generalización'
   if (sheet === 'export') return 'Compartir diagrama'
   return 'Ajustes del diagrama'
 }

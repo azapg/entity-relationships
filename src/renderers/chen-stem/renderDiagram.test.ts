@@ -8,6 +8,7 @@ import { connectionHandleBox, STATIC_HANDLE_SIDES, positionForSide, staticHandle
 import {
   ATTRIBUTE_SIZE,
   COMPOUND_COMPONENT_GAP,
+  COMPOUND_COMPONENT_DEPTH,
   COMPOUND_LEAD,
   DIAMOND_INSET,
   ENTITY_SIZE,
@@ -27,6 +28,7 @@ const baseDiagram = (overrides: Partial<Diagram> = {}): Diagram => ({
   name: 'Prueba',
   entities: [],
   relationships: [],
+  generalizations: [],
   view: { renderer: 'chen-stem', theme: 'academic', positions: {}, layoutMode: 'structured', attributeLayout: {} },
   ...overrides,
 })
@@ -149,6 +151,62 @@ describe('renderDiagram / Chen-stem', () => {
       .toMatchObject({ cardinality: { min: 0, max: 'n' } })
   })
 
+  it('projects a generalization as a coverage node and cardinality-free branches', () => {
+    const diagram = baseDiagram({
+      entities: [entity('person'), entity('student'), entity('employee')],
+      generalizations: [{
+        id: 'person-types',
+        supertypeId: 'person',
+        subtypeIds: ['student', 'employee'],
+        completeness: 'partial',
+        disjointness: 'overlapping',
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: {
+          person: { x: 240, y: 0 },
+          'person-types': { x: 300, y: 192 },
+          student: { x: 0, y: 384 },
+          employee: { x: 480, y: 384 },
+        },
+      },
+    })
+    const rendered = renderDiagram(diagram)
+    const hierarchy = rendered.nodes.find((node) => node.id === 'generalization:person-types')
+    const branches = rendered.edges.filter((edge) => edge.data?.connectorKind === 'generalization')
+
+    expect(hierarchy?.data).toMatchObject({
+      kind: 'generalization',
+      label: '(p,s)',
+      coverageDescription: 'parcial y superpuesta',
+    })
+    expect(hierarchy?.position).toEqual({ x: 300, y: 216 })
+    expect(hierarchy?.draggable).toBe(false)
+    expect(branches).toHaveLength(3)
+    expect(branches.every((edge) => edge.data?.cardinality === undefined)).toBe(true)
+    expect(branches.map((edge) => edge.target)).toContain('entity:student')
+    expect(branches.map((edge) => edge.target)).toContain('entity:employee')
+    expect(branches.find((edge) => edge.id.endsWith(':supertype'))).toMatchObject({
+      sourceHandle: 'source-south',
+      targetHandle: 'target-north',
+      data: { straight: true },
+    })
+    expect(branches.filter((edge) => edge.id.includes(':subtype:'))
+      .every((edge) => edge.sourceHandle === 'source-south' && edge.targetHandle === 'target-north')).toBe(true)
+
+    const translated = renderDiagram({
+      ...diagram,
+      view: {
+        ...diagram.view,
+        positions: Object.fromEntries(Object.entries(diagram.view.positions).map(([id, point]) => [
+          id,
+          id === 'person-types' ? point : { x: point.x + 48, y: point.y + 240 },
+        ])),
+      },
+    }).nodes.find((node) => node.id === 'generalization:person-types')
+    expect(translated?.position).toEqual({ x: 348, y: 456 })
+  })
+
   it('shows each cardinality at the opposite participant when requested', () => {
     const diagram = baseDiagram({
       entities: [entity('first'), entity('second')],
@@ -232,6 +290,9 @@ describe('renderDiagram / Chen-stem', () => {
     expect(parent.data.hasComponents).toBe(true)
     expect(children.every((node) => node.data.compoundComponent === true)).toBe(true)
     expect(Math.abs(children[1].position.y - children[0].position.y)).toBe(COMPOUND_COMPONENT_GAP)
+    expect((children[0].data.terminal as { x: number }).x - (parent.data.terminal as { x: number }).x)
+      .toBe(COMPOUND_COMPONENT_DEPTH)
+    expect(COMPOUND_COMPONENT_GAP).toBeGreaterThan(COMPOUND_COMPONENT_DEPTH)
   })
 
   it('places relationship attribute attachments exactly on the visible diamond', () => {

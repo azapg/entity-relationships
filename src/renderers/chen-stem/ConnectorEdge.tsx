@@ -6,8 +6,9 @@ import type { Cardinality, Point } from '../../domain/types'
 import { cardinalityLabel } from '../../domain/types'
 
 export type ConnectorData = {
-  connectorKind?: 'participant' | 'attribute'
+  connectorKind?: 'participant' | 'attribute' | 'generalization'
   relationshipId?: string
+  generalizationId?: string
   cardinality?: Cardinality
   targetCardinality?: Cardinality
   straight?: boolean
