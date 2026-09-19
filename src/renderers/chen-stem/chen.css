@@ -150,6 +150,13 @@
 .chen-attribute-node--west.is-compound .chen-node__label { left: 186px; top: 12px; }
 .chen-attribute-node--north.is-compound .chen-node__label { left: 96px; top: 18px; }
 .chen-attribute-node--south.is-compound .chen-node__label { left: 96px; top: 6px; }
+.chen-attribute-node--north.is-compound-component .chen-node__label,
+.chen-attribute-node--south.is-compound-component .chen-node__label {
+  left: 50%;
+  right: auto;
+  text-align: center;
+  transform: translateX(-50%);
+}
 .chen-multivalue-fork {
   position: absolute;
   z-index: 0;
