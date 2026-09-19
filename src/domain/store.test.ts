@@ -344,8 +344,7 @@ describe('modelo semántico del diagrama', () => {
       completeness: 'total',
       disjointness: 'exclusive',
     })
-    expect(state().diagram.view.positions[id].x % GRID_SIZE).toBe(0)
-    expect(state().diagram.view.positions[id].y % GRID_SIZE).toBe(0)
+    expect(state().diagram.view.positions[id]).toBeUndefined()
 
     expect(state().updateGeneralization(id, personId, [studentId, employeeId], 'partial', 'overlapping')).toBe(true)
     expect(state().diagram.generalizations[0]).toMatchObject({

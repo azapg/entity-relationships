@@ -91,6 +91,36 @@ function center(position: Point, width: number, height: number): Point {
   return { x: position.x + width / 2, y: position.y + height / 2 }
 }
 
+export type PositionedBox = {
+  position: Point
+  width: number
+  height: number
+}
+
+/** A hierarchy junction is derived from its entities, never positioned on its
+ * own. Translating the entire hierarchy therefore translates the coverage
+ * marker by the exact same delta. */
+export function generalizationPosition(
+  supertype: PositionedBox,
+  subtypes: PositionedBox[],
+  structured = false,
+): Point {
+  const supertypeCenter = center(supertype.position, supertype.width, supertype.height)
+  const subtypeCenters = subtypes.map((subtype) => center(subtype.position, subtype.width, subtype.height))
+  if (!subtypeCenters.length) return structured ? snapPoint(supertype.position) : { ...supertype.position }
+  const subtypeCenter = subtypeCenters.reduce(
+    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+    { x: 0, y: 0 },
+  )
+  subtypeCenter.x /= subtypeCenters.length
+  subtypeCenter.y /= subtypeCenters.length
+  const position = {
+    x: (supertypeCenter.x + subtypeCenter.x) / 2 - GENERALIZATION_SIZE.width / 2,
+    y: (supertypeCenter.y + subtypeCenter.y) / 2 - GENERALIZATION_SIZE.height / 2,
+  }
+  return structured ? snapPoint(position) : position
+}
+
 export function sideFor(from: Point, to: Point): AttributeSide {
   const dx = to.x - from.x
   const dy = to.y - from.y
@@ -548,24 +578,20 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
   })
 
   generalizations.forEach((generalization, index) => {
-    const supertype = entityPositions.get(generalization.supertypeId)
-    const subtypes = generalization.subtypeIds
-      .map((id) => entityPositions.get(id))
-      .filter((position): position is Point => Boolean(position))
-    const subtypeCenter = subtypes.length
-      ? subtypes.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 })
-      : undefined
-    if (subtypeCenter) {
-      subtypeCenter.x /= subtypes.length
-      subtypeCenter.y /= subtypes.length
-    }
-    const fallback = supertype && subtypeCenter
-      ? {
-        x: (supertype.x + subtypeCenter.x) / 2 + ENTITY_SIZE.width / 2 - GENERALIZATION_SIZE.width / 2,
-        y: (supertype.y + subtypeCenter.y) / 2 + ENTITY_SIZE.height / 2 - GENERALIZATION_SIZE.height / 2,
-      }
-      : { x: GRID_SIZE * (8 + index * 8), y: GRID_SIZE * 10 }
-    const position = normalizedPosition(positions[generalization.id] ?? fallback)
+    const supertypePosition = entityPositions.get(generalization.supertypeId)
+    const supertypeWidth = entityWidths.get(generalization.supertypeId)
+    const subtypes = generalization.subtypeIds.flatMap((id) => {
+      const position = entityPositions.get(id)
+      const width = entityWidths.get(id)
+      return position && width ? [{ position, width, height: ENTITY_SIZE.height }] : []
+    })
+    const position = supertypePosition && supertypeWidth && subtypes.length
+      ? generalizationPosition(
+        { position: supertypePosition, width: supertypeWidth, height: ENTITY_SIZE.height },
+        subtypes,
+        structured,
+      )
+      : normalizedPosition({ x: GRID_SIZE * (8 + index * 8), y: GRID_SIZE * 10 })
     generalizationPositions.set(generalization.id, position)
     const coverageDescription = `${generalization.completeness === 'total' ? 'total' : 'parcial'} y ${generalization.disjointness === 'exclusive' ? 'exclusiva' : 'superpuesta'}`
     nodes.push({
@@ -574,7 +600,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
       position,
       width: GENERALIZATION_SIZE.width,
       height: GENERALIZATION_SIZE.height,
-      draggable: true,
+      draggable: false,
       data: {
         semanticId: generalization.id,
         kind: 'generalization',

@@ -361,17 +361,9 @@ export const removeRelationship = (diagram: Diagram, id: string): Diagram => {
 export const insertGeneralization = (
   diagram: Diagram,
   generalization: Generalization,
-  position: Point,
 ): Diagram => ({
   ...diagram,
   generalizations: [...diagram.generalizations, generalization],
-  view: {
-    ...diagram.view,
-    positions: {
-      ...diagram.view.positions,
-      [generalization.id]: diagram.view.layoutMode === 'structured' ? snapPoint(position) : position,
-    },
-  },
 })
 
 export const patchGeneralization = (
@@ -404,8 +396,7 @@ export const removeGeneralization = (diagram: Diagram, id: string): Diagram => {
 
 export const moveItem = (diagram: Diagram, id: string, position: Point): Diagram => {
   if (!diagram.entities.some((entity) => entity.id === id)
-    && !diagram.relationships.some((relationship) => relationship.id === id)
-    && !diagram.generalizations.some((generalization) => generalization.id === id)) return diagram
+    && !diagram.relationships.some((relationship) => relationship.id === id)) return diagram
   return {
     ...diagram,
     view: {

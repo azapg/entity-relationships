@@ -179,10 +179,24 @@ describe('renderDiagram / Chen-stem', () => {
       label: '(p,s)',
       coverageDescription: 'parcial y superpuesta',
     })
+    expect(hierarchy?.position).toEqual({ x: 312, y: 216 })
+    expect(hierarchy?.draggable).toBe(false)
     expect(branches).toHaveLength(3)
     expect(branches.every((edge) => edge.data?.cardinality === undefined)).toBe(true)
     expect(branches.map((edge) => edge.target)).toContain('entity:student')
     expect(branches.map((edge) => edge.target)).toContain('entity:employee')
+
+    const translated = renderDiagram({
+      ...diagram,
+      view: {
+        ...diagram.view,
+        positions: Object.fromEntries(Object.entries(diagram.view.positions).map(([id, point]) => [
+          id,
+          id === 'person-types' ? point : { x: point.x + 48, y: point.y + 240 },
+        ])),
+      },
+    }).nodes.find((node) => node.id === 'generalization:person-types')
+    expect(translated?.position).toEqual({ x: 360, y: 456 })
   })
 
   it('shows each cardinality at the opposite participant when requested', () => {

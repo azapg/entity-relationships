@@ -115,7 +115,6 @@ export type DiagramStore = {
     subtypeIds: string[],
     completeness: GeneralizationCompleteness,
     disjointness: GeneralizationDisjointness,
-    position?: Point,
   ) => string
   updateGeneralization: (
     id: string,
@@ -282,7 +281,6 @@ export const normalizeDiagram = (diagram: Diagram): Diagram => {
   const majorIds = new Set([
     ...entityIds,
     ...relationshipIds,
-    ...generalizations.map((generalization) => generalization.id),
   ])
   const pendingCardinalities = diagram.view.pendingCardinalities
     ? Object.fromEntries(Object.entries(diagram.view.pendingCardinalities)
@@ -411,24 +409,6 @@ const defaultRelationshipPosition = (diagram: Diagram): Point => ({
   x: 260 + diagram.relationships.length * 260,
   y: 260 + (diagram.relationships.length % 2) * 120,
 })
-
-const defaultGeneralizationPosition = (diagram: Diagram, supertypeId: string, subtypeIds: string[]): Point => {
-  const supertype = diagram.view.positions[supertypeId] ?? { x: 160, y: 150 }
-  const subtypePoints = subtypeIds
-    .map((id) => diagram.view.positions[id])
-    .filter((point): point is Point => Boolean(point))
-  const subtypeCenter = subtypePoints.length
-    ? subtypePoints.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 })
-    : { x: supertype.x, y: supertype.y + 360 }
-  if (subtypePoints.length) {
-    subtypeCenter.x /= subtypePoints.length
-    subtypeCenter.y /= subtypePoints.length
-  }
-  return {
-    x: (supertype.x + subtypeCenter.x) / 2 + 60,
-    y: (supertype.y + subtypeCenter.y) / 2 + 24,
-  }
-}
 
 const unspecifiedCardinality = (): Cardinality => ({ min: 0, max: 'n' })
 
@@ -652,7 +632,7 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
       return id
     },
 
-    createGeneralization: (supertypeId, subtypeIds, completeness, disjointness, position) => {
+    createGeneralization: (supertypeId, subtypeIds, completeness, disjointness) => {
       const current = get().diagram
       const members = validGeneralizationMembers(current, supertypeId, subtypeIds)
       if (!members || introducesGeneralizationCycle(current, supertypeId, members)) return ''
@@ -664,11 +644,7 @@ export const useDiagramStore = create<InternalStore>((set, get) => {
         completeness,
         disjointness,
       }
-      commit(insertGeneralization(
-        current,
-        generalization,
-        position ?? defaultGeneralizationPosition(current, supertypeId, members),
-      ))
+      commit(insertGeneralization(current, generalization))
       return id
     },
 

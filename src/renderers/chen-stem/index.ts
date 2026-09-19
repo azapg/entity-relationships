@@ -4,9 +4,9 @@ import { RelationshipNode } from './RelationshipNode'
 import { AttributeNode } from './AttributeNode'
 import { GeneralizationNode } from './GeneralizationNode'
 import { ConnectorEdge } from './ConnectorEdge'
-import { renderDiagram } from './renderDiagram'
+import { generalizationPosition, renderDiagram } from './renderDiagram'
 
-export { EntityNode, RelationshipNode, GeneralizationNode, AttributeNode, ConnectorEdge, renderDiagram }
+export { EntityNode, RelationshipNode, GeneralizationNode, AttributeNode, ConnectorEdge, generalizationPosition, renderDiagram }
 export const nodeTypes = {
   entity: EntityNode,
   relationship: RelationshipNode,

@@ -38,7 +38,7 @@ import type {
 } from './domain/types'
 import { cardinalityLabel, generalizationLabel } from './domain/types'
 import { GRID_SIZE } from './domain/layout'
-import { renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
+import { generalizationPosition, renderDiagram, nodeTypes, edgeTypes } from './renderers/chen-stem'
 import { relationshipHandleSide } from './renderers/chen-stem/handles'
 import type { DiagramNodeData, NodeActionHandlers } from './renderers/types'
 import {
@@ -182,6 +182,40 @@ function entityAtFlowPoint(nodes: Node<DiagramNodeData>[], point: Point): string
   return hit?.data.kind === 'entity' ? hit.data.semanticId : undefined
 }
 
+function followGeneralizationEntities(
+  nodes: Node<DiagramNodeData>[],
+  generalizations: Diagram['generalizations'],
+  structured: boolean,
+) {
+  const entityNodes = new Map(nodes
+    .filter((node) => node.data.kind === 'entity')
+    .map((node) => [node.data.semanticId, node]))
+  const byId = new Map(generalizations.map((generalization) => [generalization.id, generalization]))
+  return nodes.map((node) => {
+    if (node.data.kind !== 'generalization') return node
+    const hierarchy = byId.get(node.data.semanticId)
+    if (!hierarchy) return node
+    const supertype = entityNodes.get(hierarchy.supertypeId)
+    const subtypes = hierarchy.subtypeIds.flatMap((id) => {
+      const subtype = entityNodes.get(id)
+      return subtype ? [{
+        position: subtype.position,
+        width: subtype.data.width ?? subtype.width ?? 192,
+        height: subtype.data.height ?? subtype.height ?? 96,
+      }] : []
+    })
+    if (!supertype || !subtypes.length) return node
+    return {
+      ...node,
+      position: generalizationPosition({
+        position: supertype.position,
+        width: supertype.data.width ?? supertype.width ?? 192,
+        height: supertype.data.height ?? supertype.height ?? 96,
+      }, subtypes, structured),
+    }
+  })
+}
+
 function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsFor, onRelationshipGesture }: {
   diagram: any
   selection: SemanticSelection
@@ -242,9 +276,7 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
       })
 
       const changed = applyNodeChanges<Node<DiagramNodeData>>(changes, current)
-      if (ownerDeltas.size === 0) return changed
-
-      return changed.map((node) => {
+      const withAttributes = ownerDeltas.size === 0 ? changed : changed.map((node) => {
         const data: any = node.data
         if (data?.kind !== 'attribute') return node
         const delta = ownerDeltas.get(`${data.ownerKind}:${data.ownerId}`)
@@ -258,8 +290,9 @@ function CanvasViewport({ diagram, selection, onSelect, onMove, onEdit, actionsF
           },
         }
       })
+      return followGeneralizationEntities(withAttributes, diagram.generalizations, layoutMode === 'structured')
     })
-  }, [])
+  }, [diagram.generalizations, layoutMode])
 
   const selectNode = useCallback((_: React.MouseEvent, node: Node) => {
     const data: any = node.data

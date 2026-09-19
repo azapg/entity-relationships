@@ -246,6 +246,7 @@
 .react-flow__node { cursor: grab; }
 .react-flow__node:active { cursor: grabbing; }
 .react-flow__node[data-id^='attribute:'] { cursor: default; }
+.react-flow__node[data-id^='generalization:'] { cursor: default; }
 .chen-hidden-handle {
   z-index: 3;
   /* Keep a measurable box for React Flow, then compensate its edge/center
