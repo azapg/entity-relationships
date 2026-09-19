@@ -4,6 +4,7 @@ import type {
   CardinalityPlacement,
   Diagram,
   Entity,
+  Generalization,
   Participant,
   Point,
   Relationship,
@@ -31,6 +32,9 @@ const entityIndex = (diagram: Diagram, id: string) =>
 
 const relationshipIndex = (diagram: Diagram, id: string) =>
   diagram.relationships.findIndex((relationship) => relationship.id === id)
+
+const generalizationIndex = (diagram: Diagram, id: string) =>
+  diagram.generalizations.findIndex((generalization) => generalization.id === id)
 
 const updateEntityAt = (
   diagram: Diagram,
@@ -123,6 +127,11 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
       )
       .map((relationship) => relationship.id),
   )
+  const removedGeneralizationIds = new Set(
+    diagram.generalizations
+      .filter((generalization) => generalization.supertypeId === id || generalization.subtypeIds.includes(id))
+      .map((generalization) => generalization.id),
+  )
 
   const positions = { ...diagram.view.positions }
   const attributeLayout = { ...diagram.view.attributeLayout }
@@ -132,6 +141,7 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
     delete positions[relationshipId]
     delete pendingCardinalities[relationshipId]
   })
+  removedGeneralizationIds.forEach((generalizationId) => delete positions[generalizationId])
   diagram.entities
     .find((entity) => entity.id === id)
     ?.attributes.forEach((attribute) => delete attributeLayout[attribute.id])
@@ -145,6 +155,9 @@ export const removeEntity = (diagram: Diagram, id: string): Diagram => {
     entities: diagram.entities.filter((entity) => entity.id !== id),
     relationships: diagram.relationships.filter(
       (relationship) => !removedRelationshipIds.has(relationship.id),
+    ),
+    generalizations: diagram.generalizations.filter(
+      (generalization) => !removedGeneralizationIds.has(generalization.id),
     ),
     view: {
       ...diagram.view,
@@ -345,9 +358,54 @@ export const removeRelationship = (diagram: Diagram, id: string): Diagram => {
   }
 }
 
+export const insertGeneralization = (
+  diagram: Diagram,
+  generalization: Generalization,
+  position: Point,
+): Diagram => ({
+  ...diagram,
+  generalizations: [...diagram.generalizations, generalization],
+  view: {
+    ...diagram.view,
+    positions: {
+      ...diagram.view.positions,
+      [generalization.id]: diagram.view.layoutMode === 'structured' ? snapPoint(position) : position,
+    },
+  },
+})
+
+export const patchGeneralization = (
+  diagram: Diagram,
+  id: string,
+  patch: Pick<Generalization, 'supertypeId' | 'subtypeIds' | 'completeness' | 'disjointness'>,
+): Diagram => {
+  const index = generalizationIndex(diagram, id)
+  if (index < 0) return diagram
+  return {
+    ...diagram,
+    generalizations: diagram.generalizations.map((generalization, currentIndex) =>
+      currentIndex === index
+        ? { ...generalization, ...patch, subtypeIds: [...patch.subtypeIds] }
+        : generalization,
+    ),
+  }
+}
+
+export const removeGeneralization = (diagram: Diagram, id: string): Diagram => {
+  if (generalizationIndex(diagram, id) < 0) return diagram
+  const positions = { ...diagram.view.positions }
+  delete positions[id]
+  return {
+    ...diagram,
+    generalizations: diagram.generalizations.filter((generalization) => generalization.id !== id),
+    view: { ...diagram.view, positions },
+  }
+}
+
 export const moveItem = (diagram: Diagram, id: string, position: Point): Diagram => {
   if (!diagram.entities.some((entity) => entity.id === id)
-    && !diagram.relationships.some((relationship) => relationship.id === id)) return diagram
+    && !diagram.relationships.some((relationship) => relationship.id === id)
+    && !diagram.generalizations.some((generalization) => generalization.id === id)) return diagram
   return {
     ...diagram,
     view: {
@@ -419,6 +477,10 @@ export const cloneDiagram = (diagram: Diagram): Diagram => ({
       cardinality: { ...participant.cardinality },
     })),
     attributes: relationship.attributes.map((attribute) => ({ ...attribute })),
+  })),
+  generalizations: (diagram.generalizations ?? []).map((generalization) => ({
+    ...generalization,
+    subtypeIds: [...generalization.subtypeIds],
   })),
   view: {
     ...diagram.view,

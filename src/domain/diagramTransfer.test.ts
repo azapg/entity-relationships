@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { createSampleDiagram } from './sample'
+import { createCase6Diagram, createSampleDiagram } from './sample'
 import {
   DiagramImportError,
   parseDiagramFile,
@@ -13,6 +13,16 @@ describe('archivos de diagrama JSON', () => {
     diagram.view.theme = 'modern'
 
     expect(parseDiagramFile(serializeDiagramFile(diagram))).toEqual(diagram)
+  })
+
+  it('round-trips generalizations and rejects invalid coverage codes', () => {
+    const diagram = createCase6Diagram()
+    const serialized = serializeDiagramFile(diagram)
+    expect(parseDiagramFile(serialized).generalizations).toEqual(diagram.generalizations)
+
+    const payload = JSON.parse(serialized)
+    payload.diagram.generalizations[0].completeness = 'complete'
+    expect(() => parseDiagramFile(JSON.stringify(payload))).toThrow(DiagramImportError)
   })
 
   it('rejects unrelated JSON files', () => {

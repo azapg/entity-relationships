@@ -1,5 +1,6 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { Attribute, Cardinality, Diagram, Point, Relationship } from '../../domain/types'
+import { generalizationLabel } from '../../domain/types'
 import { GRID_SIZE } from '../../domain/layout'
 import type { AttributeSide, DiagramNodeData, RenderedDiagram } from '../types'
 import { staticHandleId } from './handles'
@@ -8,6 +9,7 @@ import { staticHandleId } from './handles'
 export const ENTITY_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE * 4 }
 export const RELATION_SIZE = { width: GRID_SIZE * 4, height: GRID_SIZE * 4 }
 export const ATTRIBUTE_SIZE = { width: GRID_SIZE * 8, height: GRID_SIZE }
+export const GENERALIZATION_SIZE = { width: GRID_SIZE * 3, height: GRID_SIZE * 2 }
 export const ATTRIBUTE_GAP = GRID_SIZE
 export const COMPOUND_LEAD = GRID_SIZE * 4
 /** Compound children get a little more breathing room than ordinary
@@ -49,7 +51,7 @@ type ProjectedAttribute = {
   geometry: AttributeGeometry
 }
 
-const nodeId = (kind: OwnerKind, id: string) => `${kind}:${id}`
+const nodeId = (kind: OwnerKind | 'generalization', id: string) => `${kind}:${id}`
 export const attrNodeId = (kind: OwnerKind, ownerId: string, attributeId: string) =>
   `attribute:${kind}:${ownerId}:${attributeId}`
 
@@ -101,7 +103,10 @@ export function oppositeSide(side: AttributeSide): AttributeSide {
 }
 
 const selectedFor = (selectedId: string | undefined, id: string) =>
-  selectedId === id || selectedId === nodeId('entity', id) || selectedId === nodeId('relationship', id)
+  selectedId === id
+  || selectedId === nodeId('entity', id)
+  || selectedId === nodeId('relationship', id)
+  || selectedId === nodeId('generalization', id)
 
 const sideAssignment = (value: unknown): AttributeSide | undefined => {
   if (typeof value === 'string' && SIDES.includes(value as AttributeSide)) return value as AttributeSide
@@ -419,9 +424,11 @@ function connectionSides(
   diagram: Diagram,
   entityPositions: Map<string, Point>,
   relationshipPositions: Map<string, Point>,
+  generalizationPositions: Map<string, Point>,
   entityWidths: Map<string, number>,
 ): ConnectionMap {
   const result: ConnectionMap = new Map()
+  const generalizations = diagram.generalizations ?? []
   const increment = (id: string, side: AttributeSide) => {
     const current = result.get(id) ?? {}
     current[side] = (current[side] ?? 0) + 1
@@ -450,6 +457,21 @@ function connectionSides(
       const entitySide = sideFor(entityCenter, relationshipCenter)
       increment(participant.entityId, entitySide)
       increment(relationship.id, oppositeSide(entitySide))
+    })
+  })
+  generalizations.forEach((generalization) => {
+    const generalizationPosition = generalizationPositions.get(generalization.id)
+    const supertypePosition = entityPositions.get(generalization.supertypeId)
+    const supertypeWidth = entityWidths.get(generalization.supertypeId)
+    if (!generalizationPosition || !supertypePosition || !supertypeWidth) return
+    const generalizationCenter = center(generalizationPosition, GENERALIZATION_SIZE.width, GENERALIZATION_SIZE.height)
+    const supertypeCenter = center(supertypePosition, supertypeWidth, ENTITY_SIZE.height)
+    increment(generalization.supertypeId, sideFor(supertypeCenter, generalizationCenter))
+    generalization.subtypeIds.forEach((subtypeId) => {
+      const subtypePosition = entityPositions.get(subtypeId)
+      const subtypeWidth = entityWidths.get(subtypeId)
+      if (!subtypePosition || !subtypeWidth) return
+      increment(subtypeId, sideFor(center(subtypePosition, subtypeWidth, ENTITY_SIZE.height), generalizationCenter))
     })
   })
   return result
@@ -489,9 +511,11 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
   const normalizedPosition = (position: Point) => structured ? snapPoint(position) : position
   const entityPositions = new Map<string, Point>()
   const relationshipPositions = new Map<string, Point>()
+  const generalizationPositions = new Map<string, Point>()
   const entityWidths = new Map<string, number>()
   const font = view.theme === 'modern' || (view.theme === 'custom' && view.customTheme?.font === 'sans') ? 'sans' : 'serif'
   const cardinalityPlacement = view.cardinalityPlacement ?? 'near-entity'
+  const generalizations = diagram.generalizations ?? []
 
   diagram.entities.forEach((entity, index) => {
     const position = normalizedPosition(positions[entity.id] ?? { x: GRID_SIZE * (5 + index * 10), y: GRID_SIZE * 6 })
@@ -523,6 +547,46 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     })
   })
 
+  generalizations.forEach((generalization, index) => {
+    const supertype = entityPositions.get(generalization.supertypeId)
+    const subtypes = generalization.subtypeIds
+      .map((id) => entityPositions.get(id))
+      .filter((position): position is Point => Boolean(position))
+    const subtypeCenter = subtypes.length
+      ? subtypes.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 })
+      : undefined
+    if (subtypeCenter) {
+      subtypeCenter.x /= subtypes.length
+      subtypeCenter.y /= subtypes.length
+    }
+    const fallback = supertype && subtypeCenter
+      ? {
+        x: (supertype.x + subtypeCenter.x) / 2 + ENTITY_SIZE.width / 2 - GENERALIZATION_SIZE.width / 2,
+        y: (supertype.y + subtypeCenter.y) / 2 + ENTITY_SIZE.height / 2 - GENERALIZATION_SIZE.height / 2,
+      }
+      : { x: GRID_SIZE * (8 + index * 8), y: GRID_SIZE * 10 }
+    const position = normalizedPosition(positions[generalization.id] ?? fallback)
+    generalizationPositions.set(generalization.id, position)
+    const coverageDescription = `${generalization.completeness === 'total' ? 'total' : 'parcial'} y ${generalization.disjointness === 'exclusive' ? 'exclusiva' : 'superpuesta'}`
+    nodes.push({
+      id: nodeId('generalization', generalization.id),
+      type: 'generalization',
+      position,
+      width: GENERALIZATION_SIZE.width,
+      height: GENERALIZATION_SIZE.height,
+      draggable: true,
+      data: {
+        semanticId: generalization.id,
+        kind: 'generalization',
+        label: generalizationLabel(generalization),
+        coverageDescription,
+        selected: selectedFor(selectedId, generalization.id),
+        width: GENERALIZATION_SIZE.width,
+        height: GENERALIZATION_SIZE.height,
+      },
+    })
+  })
+
   const owners: OwnerGeometry[] = [
     ...diagram.entities.map((entity) => ({
       kind: 'entity' as const,
@@ -541,7 +605,13 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
     })),
   ]
 
-  const connectionOccupied = connectionSides(diagram, entityPositions, relationshipPositions, entityWidths)
+  const connectionOccupied = connectionSides(
+    diagram,
+    entityPositions,
+    relationshipPositions,
+    generalizationPositions,
+    entityWidths,
+  )
   const nearbyOwnerOccupied = blockedSidesByNearbyOwners(owners)
   const occupied = (id: string) => {
     const connection = connectionOccupied.get(id)
@@ -646,6 +716,52 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
           cardinalityPending: Boolean(view.pendingCardinalities?.[relationship.id]),
           recursiveOffset,
           selected: selectedFor(selectedId, relationship.id),
+        },
+      })
+    })
+  })
+
+  generalizations.forEach((generalization) => {
+    const position = generalizationPositions.get(generalization.id)
+    const supertypePosition = entityPositions.get(generalization.supertypeId)
+    const supertypeWidth = entityWidths.get(generalization.supertypeId)
+    if (!position || !supertypePosition || !supertypeWidth) return
+    const hierarchyCenter = center(position, GENERALIZATION_SIZE.width, GENERALIZATION_SIZE.height)
+    const supertypeCenter = center(supertypePosition, supertypeWidth, ENTITY_SIZE.height)
+    const sourceSide = sideFor(supertypeCenter, hierarchyCenter)
+    const hierarchyTargetSide = oppositeSide(sourceSide)
+    edges.push({
+      id: `generalization-edge:${generalization.id}:supertype`,
+      type: 'connector',
+      source: nodeId('entity', generalization.supertypeId),
+      target: nodeId('generalization', generalization.id),
+      sourceHandle: staticHandleId('source', sourceSide),
+      targetHandle: staticHandleId('target', hierarchyTargetSide),
+      selectable: false,
+      data: {
+        connectorKind: 'generalization',
+        generalizationId: generalization.id,
+        selected: selectedFor(selectedId, generalization.id),
+      },
+    })
+    generalization.subtypeIds.forEach((subtypeId, index) => {
+      const subtypePosition = entityPositions.get(subtypeId)
+      const subtypeWidth = entityWidths.get(subtypeId)
+      if (!subtypePosition || !subtypeWidth) return
+      const subtypeCenter = center(subtypePosition, subtypeWidth, ENTITY_SIZE.height)
+      const hierarchySourceSide = sideFor(hierarchyCenter, subtypeCenter)
+      edges.push({
+        id: `generalization-edge:${generalization.id}:subtype:${subtypeId}:${index}`,
+        type: 'connector',
+        source: nodeId('generalization', generalization.id),
+        target: nodeId('entity', subtypeId),
+        sourceHandle: staticHandleId('source', hierarchySourceSide),
+        targetHandle: staticHandleId('target', oppositeSide(hierarchySourceSide)),
+        selectable: false,
+        data: {
+          connectorKind: 'generalization',
+          generalizationId: generalization.id,
+          selected: selectedFor(selectedId, generalization.id),
         },
       })
     })

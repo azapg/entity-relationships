@@ -27,6 +27,7 @@ const baseDiagram = (overrides: Partial<Diagram> = {}): Diagram => ({
   name: 'Prueba',
   entities: [],
   relationships: [],
+  generalizations: [],
   view: { renderer: 'chen-stem', theme: 'academic', positions: {}, layoutMode: 'structured', attributeLayout: {} },
   ...overrides,
 })
@@ -147,6 +148,41 @@ describe('renderDiagram / Chen-stem', () => {
     })
     expect(first.edges.find((edge) => edge.id === 'participant-edge:sample-enrolls:sample-student:0')?.data)
       .toMatchObject({ cardinality: { min: 0, max: 'n' } })
+  })
+
+  it('projects a generalization as a coverage node and cardinality-free branches', () => {
+    const diagram = baseDiagram({
+      entities: [entity('person'), entity('student'), entity('employee')],
+      generalizations: [{
+        id: 'person-types',
+        supertypeId: 'person',
+        subtypeIds: ['student', 'employee'],
+        completeness: 'partial',
+        disjointness: 'overlapping',
+      }],
+      view: {
+        ...baseDiagram().view,
+        positions: {
+          person: { x: 240, y: 0 },
+          'person-types': { x: 300, y: 192 },
+          student: { x: 0, y: 384 },
+          employee: { x: 480, y: 384 },
+        },
+      },
+    })
+    const rendered = renderDiagram(diagram)
+    const hierarchy = rendered.nodes.find((node) => node.id === 'generalization:person-types')
+    const branches = rendered.edges.filter((edge) => edge.data?.connectorKind === 'generalization')
+
+    expect(hierarchy?.data).toMatchObject({
+      kind: 'generalization',
+      label: '(p,s)',
+      coverageDescription: 'parcial y superpuesta',
+    })
+    expect(branches).toHaveLength(3)
+    expect(branches.every((edge) => edge.data?.cardinality === undefined)).toBe(true)
+    expect(branches.map((edge) => edge.target)).toContain('entity:student')
+    expect(branches.map((edge) => edge.target)).toContain('entity:employee')
   })
 
   it('shows each cardinality at the opposite participant when requested', () => {

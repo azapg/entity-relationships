@@ -68,6 +68,32 @@
   transform-origin: center;
 }
 
+.chen-generalization-node {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 48px;
+}
+.chen-generalization-node__label {
+  position: relative;
+  z-index: 2;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--ink, #25231f) 22%, transparent);
+  border-radius: 999px;
+  color: var(--ink, #25231f);
+  background: var(--canvas, #fbfaf6);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1;
+  white-space: nowrap;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.chen-generalization-node.is-selected .chen-generalization-node__label {
+  border-color: var(--accent, #9c3b23);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #9c3b23) 18%, transparent);
+}
+
 /* The attribute box is an invisible 8-grid-unit canvas. The terminal is
  * placed on its appropriate boundary and the label is anchored outward. */
 .chen-attribute-node {

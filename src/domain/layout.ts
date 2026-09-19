@@ -70,9 +70,10 @@ const attributeIdsByOwner = (diagram: Diagram) => {
 const majorIds = (diagram: Diagram) => new Set([
   ...diagram.entities.map((entity) => entity.id),
   ...diagram.relationships.map((relationship) => relationship.id),
+  ...diagram.generalizations.map((generalization) => generalization.id),
 ])
 
-/** Snap only entity/relationship coordinates; attributes have no coordinates. */
+/** Snap entity, relationship, and hierarchy coordinates; attributes have no coordinates. */
 export const snapMajorPositions = (diagram: Diagram): Record<string, Point> => {
   const ids = majorIds(diagram)
   return Object.fromEntries(

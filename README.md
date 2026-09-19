@@ -2,7 +2,9 @@
 
 Editor conceptual de diagramas entidad–relación de Nightingale, con notación académica tipo Chen. El diagrama semántico es la fuente de verdad; React Flow solo representa su proyección visual.
 
-La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, temas, persistencia local, undo/redo, intercambio de diagramas editables mediante JSON y exportación del diagrama completo como PNG, PDF o imagen en el portapapeles.
+La interfaz está en español e incluye entidades fuertes/débiles, atributos clave, relaciones binarias con cardinalidades, atributos de relación, generalizaciones con cobertura total/parcial y exclusiva/superpuesta, temas, persistencia local, undo/redo, intercambio de diagramas editables mediante JSON y exportación del diagrama completo como PNG, PDF o imagen en el portapapeles.
+
+El primer inicio abre **Caso 6 · Proyectos de investigación**, un modelo EER completo que usa `(t,e)` para las jerarquías `PROFESOR → DOCTOR / NO DOCTOR` y `PUBLICACIÓN → REVISTA / CONGRESO`. Selecciona una entidad y usa **Generalizar** (o `G`) para crear otra jerarquía; selecciona su etiqueta de cobertura para editarla.
 
 ## Arquitectura
 

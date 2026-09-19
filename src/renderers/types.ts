@@ -20,10 +20,12 @@ export type NodeActionHandlers = {
   createRelationship?: () => void
   rename?: () => void
   editCardinality?: () => void
+  createGeneralization?: () => void
+  editGeneralization?: () => void
   delete?: () => void
 }
 
-export type DiagramNodeKind = 'entity' | 'relationship' | 'attribute'
+export type DiagramNodeKind = 'entity' | 'relationship' | 'generalization' | 'attribute'
 
 export type DiagramNodeData = Record<string, unknown> & {
   semanticId: string
