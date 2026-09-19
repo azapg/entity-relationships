@@ -114,11 +114,27 @@ export function generalizationPosition(
   )
   subtypeCenter.x /= subtypeCenters.length
   subtypeCenter.y /= subtypeCenters.length
-  const position = {
-    x: (supertypeCenter.x + subtypeCenter.x) / 2 - GENERALIZATION_SIZE.width / 2,
-    y: (supertypeCenter.y + subtypeCenter.y) / 2 - GENERALIZATION_SIZE.height / 2,
+  const flowSide = sideFor(supertypeCenter, subtypeCenter)
+  const vertical = flowSide === 'north' || flowSide === 'south'
+  const midpoint = {
+    x: (supertypeCenter.x + subtypeCenter.x) / 2,
+    y: (supertypeCenter.y + subtypeCenter.y) / 2,
   }
-  return structured ? snapPoint(position) : position
+  const position = {
+    // Keep the junction on the supertype's centerline. Only its position
+    // along the hierarchy's flow axis is derived from the subtype group.
+    // This makes the trunk straight even when the subtype group is uneven.
+    x: (vertical ? supertypeCenter.x : midpoint.x) - GENERALIZATION_SIZE.width / 2,
+    y: (vertical ? midpoint.y : supertypeCenter.y) - GENERALIZATION_SIZE.height / 2,
+  }
+  if (!structured) return position
+  const snapped = snapPoint(position)
+  return {
+    // Snapping the cross-axis coordinate would introduce a visible elbow
+    // whenever an entity or junction has a half-grid center.
+    x: vertical ? position.x : snapped.x,
+    y: vertical ? snapped.y : position.y,
+  }
 }
 
 export function sideFor(from: Point, to: Point): AttributeSide {
@@ -496,12 +512,13 @@ function connectionSides(
     if (!generalizationPosition || !supertypePosition || !supertypeWidth) return
     const generalizationCenter = center(generalizationPosition, GENERALIZATION_SIZE.width, GENERALIZATION_SIZE.height)
     const supertypeCenter = center(supertypePosition, supertypeWidth, ENTITY_SIZE.height)
-    increment(generalization.supertypeId, sideFor(supertypeCenter, generalizationCenter))
+    const flowSide = sideFor(supertypeCenter, generalizationCenter)
+    increment(generalization.supertypeId, flowSide)
     generalization.subtypeIds.forEach((subtypeId) => {
       const subtypePosition = entityPositions.get(subtypeId)
       const subtypeWidth = entityWidths.get(subtypeId)
       if (!subtypePosition || !subtypeWidth) return
-      increment(subtypeId, sideFor(center(subtypePosition, subtypeWidth, ENTITY_SIZE.height), generalizationCenter))
+      increment(subtypeId, oppositeSide(flowSide))
     })
   })
   return result
@@ -767,6 +784,7 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
       data: {
         connectorKind: 'generalization',
         generalizationId: generalization.id,
+        straight: true,
         selected: selectedFor(selectedId, generalization.id),
       },
     })
@@ -774,15 +792,13 @@ export function renderDiagram(diagram: Diagram, selectedId?: string): RenderedDi
       const subtypePosition = entityPositions.get(subtypeId)
       const subtypeWidth = entityWidths.get(subtypeId)
       if (!subtypePosition || !subtypeWidth) return
-      const subtypeCenter = center(subtypePosition, subtypeWidth, ENTITY_SIZE.height)
-      const hierarchySourceSide = sideFor(hierarchyCenter, subtypeCenter)
       edges.push({
         id: `generalization-edge:${generalization.id}:subtype:${subtypeId}:${index}`,
         type: 'connector',
         source: nodeId('generalization', generalization.id),
         target: nodeId('entity', subtypeId),
-        sourceHandle: staticHandleId('source', hierarchySourceSide),
-        targetHandle: staticHandleId('target', oppositeSide(hierarchySourceSide)),
+        sourceHandle: staticHandleId('source', sourceSide),
+        targetHandle: staticHandleId('target', oppositeSide(sourceSide)),
         selectable: false,
         data: {
           connectorKind: 'generalization',
